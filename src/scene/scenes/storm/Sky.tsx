@@ -1,0 +1,66 @@
+import { forwardRef, useMemo } from 'react'
+import { BackSide, Color, ShaderMaterial } from 'three'
+
+/**
+ * Storm sky dome: churning clouds lit from within by lightning, a faint horizon, and — as the storm calms —
+ * stars and a golden-teal dawn glow low behind the cage.
+ */
+export interface SkyUniforms {
+  uTime: { value: number }
+  uFlash: { value: number }
+  uCalm: { value: number }
+  uHorizon: { value: Color }
+  uZenith: { value: Color }
+}
+
+export const Sky = forwardRef<ShaderMaterial>((_p, ref) => {
+  const uniforms = useMemo(
+    () => ({
+      uTime: { value: 0 },
+      uFlash: { value: 0 },
+      uCalm: { value: 0 },
+      uHorizon: { value: new Color('#0a1220') },
+      uZenith: { value: new Color('#02040a') },
+    }),
+    [],
+  )
+  return (
+    <mesh renderOrder={-10} frustumCulled={false}>
+      <sphereGeometry args={[320, 40, 24]} />
+      <shaderMaterial
+        ref={ref}
+        uniforms={uniforms}
+        side={BackSide}
+        depthWrite={false}
+        fog={false}
+        vertexShader={/* glsl */ `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`}
+        fragmentShader={/* glsl */ `
+          uniform float uTime; uniform float uFlash; uniform float uCalm; uniform vec3 uHorizon; uniform vec3 uZenith;
+          varying vec3 vDir;
+          float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+          float noise(vec2 p){ vec2 i = floor(p); vec2 f = fract(p); f = f*f*(3.0-2.0*f);
+            return mix(mix(hash(i), hash(i+vec2(1,0)), f.x), mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y); }
+          float fbm(vec2 p){ float a = 0.5; float s = 0.0; for(int i=0;i<5;i++){ s += a*noise(p); p *= 2.07; a *= 0.5; } return s; }
+          void main(){
+            vec3 d = normalize(vDir);
+            float up = max(d.y, 0.0);
+            vec3 col = mix(uHorizon, uZenith, smoothstep(0.0, 0.7, up));
+            vec2 uv = d.xz / (d.y + 0.35) * 2.2;
+            float n = fbm(uv + vec2(uTime * 0.03, uTime * 0.012));
+            float n2 = fbm(uv * 1.7 - uTime * 0.02 + 4.0);
+            float cloud = smoothstep(0.36, 0.82, n * 0.7 + n2 * 0.5) * smoothstep(-0.02, 0.22, d.y);
+            cloud *= 1.0 - 0.75 * uCalm;
+            vec3 cc = mix(vec3(0.015, 0.025, 0.04), vec3(0.62, 0.72, 0.92), uFlash * (0.35 + 0.65 * n));
+            col = mix(col, cc, cloud * 0.9);
+            col += uFlash * 0.22 * vec3(0.5, 0.6, 0.85) * (1.0 - up * 0.5);
+            // stars + dawn glow once calm
+            float st = step(0.9965, hash(floor(d * 380.0).xy + floor(d * 380.0).z)) * smoothstep(0.08, 0.5, d.y);
+            col += st * uCalm * vec3(0.9, 0.95, 1.0) * (0.6 + 0.4 * sin(uTime * 3.0 + d.x * 90.0));
+            float glow = exp(-pow(d.y * 5.0, 2.0)) * smoothstep(-0.2, 0.9, d.z);
+            col += glow * uCalm * vec3(0.95, 0.55, 0.22) * 0.55;
+            gl_FragColor = vec4(col, 1.0);
+          }`}
+      />
+    </mesh>
+  )
+})

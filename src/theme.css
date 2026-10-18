@@ -1,0 +1,30 @@
+/* ==========================================================================
+   THEME — the single place to retheme the whole site.
+   The 3D scenes read --accent / --accent-glow / --accent-2 at runtime (see theme.ts),
+   so changing the variables below recolours DOM *and* WebGL.
+
+   To try the black-and-gold championship palette, either:
+     • add data-theme="gold" to <html> in index.html, or
+     • copy the values from the [data-theme="gold"] block into :root.
+   ========================================================================== */
+:root {
+  --bg: #0a0a0b;
+  --bg-2: #111114;
+  --ink: #f2efe9;
+  --ink-dim: rgba(242, 239, 233, 0.72);
+  --line: rgba(242, 239, 233, 0.16);
+
+  --accent: #e11d2e;       /* main bold accent (red) */
+  --accent-glow: #ff4757;  /* brighter version used for glows / emissive */
+  --accent-2: #ffb347;     /* warm secondary (amber) used sparingly */
+
+  --font-display: 'Bebas Neue', Impact, 'Arial Narrow', sans-serif;
+  --font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+/* Black & gold championship palette — swap in whenever you like. */
+[data-theme='gold'] {
+  --accent: #d4a017;
+  --accent-glow: #ffd34e;
+  --accent-2: #fff1b8;
+}
