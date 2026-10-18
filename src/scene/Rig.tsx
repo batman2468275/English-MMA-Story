@@ -19,6 +19,9 @@ export const light = {
   ptColor: null as Color | null,
   hemiAdd: 0,
   keyMul: 1,
+  /** override the direction/colour of the key (directional) light — e.g. lightning rim-lighting from the bolt */
+  keyPos: null as Vector3 | null,
+  keyColor: null as Color | null,
 }
 
 export function resetLight() {
@@ -28,6 +31,8 @@ export function resetLight() {
   light.ptColor = null
   light.hemiAdd = 0
   light.keyMul = 1
+  light.keyPos = null
+  light.keyColor = null
 }
 
 export function Rig() {
@@ -68,14 +73,14 @@ export function Rig() {
     cur.bg.lerp(tmp.set(g.bg), k)
     cur.sky.lerp(tmp.set(g.hemiSky), k)
     cur.ground.lerp(tmp.set(g.hemiGround), k)
-    cur.key.lerp(tmp.set(g.key), k)
+    cur.key.lerp(light.keyColor ?? tmp.set(g.key), light.keyColor ? 0.6 : k)
     cur.pt.lerp(light.ptColor ?? tmp.set(g.pt), light.ptColor ? 0.5 : k)
     cur.hemi = damp(cur.hemi, g.hemi, 3.2, dt)
     cur.keyI = damp(cur.keyI, g.keyI, 3.2, dt)
     cur.ptI = damp(cur.ptI, g.ptI, 3.2, dt)
     cur.fogNear = damp(cur.fogNear, g.fogNear, 3.2, dt)
     cur.fogFar = damp(cur.fogFar, g.fogFar, 3.2, dt)
-    cur.keyPos.lerp(tmpV.set(...g.keyPos), k)
+    cur.keyPos.lerp(light.keyPos ?? tmpV.set(...g.keyPos), light.keyPos ? 0.7 : k)
     cur.ptPos.lerp(light.ptPos ?? tmpV.set(...g.ptPos), light.ptPos ? 0.5 : k)
     cur.bloom = damp(cur.bloom, g.bloom, 3.2, dt)
     cur.sat = damp(cur.sat, g.sat, 3.2, dt)

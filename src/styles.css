@@ -1,4 +1,4 @@
-/* ==========================================================================
+﻿/* ==========================================================================
    Layout + components. Colours come from theme.css variables.
    Stacking: canvas(0) < story content(2) < fx overlays(40) < UI(60) < cursor(100) < loader(300)
    ========================================================================== */
@@ -117,25 +117,6 @@ button { font: inherit; color: inherit; }
 .wi { display: inline-block; }
 .sentences .sent { display: block; margin-bottom: 0.7em; }
 
-/* ---------- Photo placeholders ---------- */
-.sec-now .photo { top: 7vh; right: 64px; width: min(170px, 13vw); }
-.photo { position: absolute; top: calc(50% - 170px); width: min(250px, 19vw); margin: 0; z-index: 3; }
-.photo-left { left: clamp(36px, 6vw, 110px); }
-.photo-right { right: clamp(70px, 9vw, 160px); }
-.photo-frame {
-  background: #efeae0; padding: 10px 10px 34px;
-  transform: rotate(var(--tilt, -3deg));
-  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
-}
-.photo-frame img, .photo-empty { display: block; width: 100%; aspect-ratio: 4 / 5; object-fit: cover; }
-.photo-empty {
-  display: grid; place-items: center;
-  border: 1.5px dashed rgba(10, 10, 11, 0.45);
-  background: repeating-linear-gradient(135deg, #e5dfd2 0 10px, #ddd6c7 10px 20px);
-}
-.photo-empty span { font-size: 0.6rem; letter-spacing: 0.2em; color: rgba(10, 10, 11, 0.55); text-align: center; padding: 0 8px; }
-.photo figcaption { margin-top: 18px; font-size: 0.7rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-dim); text-align: center; }
-
 /* ---------- Hero ---------- */
 .hero-copy { position: absolute; left: clamp(28px, 6vw, 110px); bottom: 11vh; right: 70px; }
 .hero-title { font-family: var(--font-display); font-weight: 400; margin: 0.35em 0 0; }
@@ -192,23 +173,18 @@ button { font: inherit; color: inherit; }
 
 /* ---------- Closing ---------- */
 .now-copy .para { font-size: clamp(1.1rem, 1.55vw, 1.5rem); }
-.cta-wrap { margin-top: 2.6rem; opacity: 0; display: flex; justify-content: center; }
-.magnetic {
-  position: relative; display: inline-flex; text-decoration: none;
-  padding: 1.15rem 2.8rem; border-radius: 999px;
-  border: 1.5px solid var(--accent-glow);
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-  font-family: var(--font-display); font-size: clamp(1.6rem, 2.4vw, 2.3rem); letter-spacing: 0.1em;
-  color: #fff; text-shadow: 0 0 20px color-mix(in srgb, var(--accent-glow) 80%, transparent);
-  animation: pulse 2.6s ease-in-out infinite;
+.closing-line { margin-top: 2.6rem; opacity: 0; display: flex; align-items: center; justify-content: center; gap: clamp(14px, 2.4vw, 32px); will-change: transform, opacity; }
+.closing-line p {
+  font-family: var(--font-display); font-size: clamp(2rem, 3.6vw, 3.6rem); letter-spacing: 0.1em; line-height: 1; color: #fff; white-space: nowrap;
+  text-shadow: 0 0 26px color-mix(in srgb, var(--accent-glow) 85%, transparent), 0 0 3px rgba(255, 255, 255, 0.6);
+  animation: breathe 3.2s ease-in-out infinite;
 }
-.magnetic:hover { background: var(--accent); }
-.magnetic-inner { display: inline-block; }
-@keyframes pulse {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-glow) 50%, transparent), 0 0 30px color-mix(in srgb, var(--accent) 40%, transparent); }
-  50% { box-shadow: 0 0 0 16px transparent, 0 0 56px color-mix(in srgb, var(--accent-glow) 65%, transparent); }
+.closing-rule { height: 1px; flex: 1 1 40px; max-width: 120px; background: linear-gradient(90deg, transparent, var(--accent-glow)); }
+.closing-rule:last-child { background: linear-gradient(270deg, transparent, var(--accent-glow)); }
+@keyframes breathe {
+  0%, 100% { text-shadow: 0 0 18px color-mix(in srgb, var(--accent-glow) 60%, transparent), 0 0 3px rgba(255, 255, 255, 0.5); }
+  50% { text-shadow: 0 0 44px color-mix(in srgb, var(--accent-glow) 95%, transparent), 0 0 4px rgba(255, 255, 255, 0.8); }
 }
-
 /* ---------- Progress "cage fence" (right edge) ---------- */
 .fence { position: fixed; right: 0; top: 0; bottom: 0; width: 30px; z-index: 60; pointer-events: none; }
 .fence-mesh, .fence-fill {
@@ -292,7 +268,6 @@ button { font: inherit; color: inherit; }
   .chapter-title { font-size: clamp(2.4rem, 12vw, 3.6rem); margin: 0.15em 0 0.25em; }
   .para, .copy-center .para, .now-copy .para { font-size: 0.95rem; line-height: 1.55; }
   .bgword span { font-size: 40vw; }
-  .photo { display: none; }
   .hero-copy { left: 18px; right: 46px; bottom: 9svh; }
   .hero-line { font-size: 18vw; }
   .hero-cue { position: static; margin-top: 1.4rem; }
@@ -307,6 +282,9 @@ button { font: inherit; color: inherit; }
   .beat, .vlabel { display: none; }
   .audio-toggle { bottom: 12px; left: 12px; }
   .audio-label { display: none; }
+  .closing-line { justify-content: flex-start; margin-top: 1.4rem; }
+  .closing-line p { white-space: normal; font-size: 2rem; }
+  .closing-rule { display: none; }
 }
 
 /* ---------- Reduced motion / no-WebGL fallback ----------
@@ -326,10 +304,10 @@ button { font: inherit; color: inherit; }
 .reduced .keyline .hotword { color: var(--accent-glow); }
 .reduced .storm-eyebrow, .reduced .tl-head { position: relative; display: block; left: auto; top: auto; width: min(720px, 88vw); margin: 0 auto 2rem; }
 .reduced .tl-card { position: relative; inset: auto !important; opacity: 1 !important; transform: none !important; margin: 0 auto 1.4rem; width: min(560px, 88vw); }
-.reduced .tl-rail, .reduced .beat, .reduced .photo { display: none; }
-.reduced .cta-wrap { opacity: 1 !important; transform: none !important; }
+.reduced .tl-rail, .reduced .beat { display: none; }
+.reduced .closing-line { opacity: 1 !important; transform: none !important; }
 .reduced .scrub { opacity: 1 !important; transform: none !important; filter: none !important; }
-.reduced .magnetic { animation: none; }
+.reduced .closing-line p { animation: none; }
 .reduced .sec-hero { background: radial-gradient(ellipse at 50% 90%, #3a0a10, #040405 70%); }
 .reduced .sec-driveway { background: linear-gradient(180deg, #0a0c18, #3a2410 140%); }
 .reduced .sec-basement { background: radial-gradient(ellipse at 50% 20%, #12306f, #04060c 70%); }
@@ -345,3 +323,4 @@ button { font: inherit; color: inherit; }
 .reduced .sec-timeline { background: linear-gradient(180deg, #05060a, #1a0a10); }
 .reduced .sec-now { background: linear-gradient(180deg, #02030a, #0b1230); }
 .reduced .loader { transition: none; }
+

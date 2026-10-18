@@ -1,24 +1,14 @@
 import { chapters } from '../content/story'
 import { SectionShell } from './SectionShell'
 import { ScrubText } from '../ui/ScrubText'
-import { PhotoSlot } from '../ui/PhotoSlot'
-
-/** Which chapters carry a [PHOTO PLACEHOLDER] frame (and on which side). */
-const photoFor: Record<string, { slot: string; tilt: number }> = {
-  driveway: { slot: 'driveway', tilt: 3 },
-  basement: { slot: 'basement', tilt: -4 },
-  gym: { slot: 'gym', tilt: 4 },
-  mma: { slot: 'mma', tilt: -3 },
-}
 
 /**
  * Generic text chapter: layered background (giant outlined word, chapter number, light rays, HUD corners),
- * a legibility scrim, the scrubbed copy and an optional photo frame. Used by most sections.
+ * a legibility scrim and the scrubbed copy. The 3D subject is composed on the opposite side of the screen
+ * (see `setCam` in scene/camera.ts), so the text column and the scene balance each other. Used by most sections.
  */
 export function Chapter({ index }: { index: number }) {
   const c = chapters[index]
-  const photo = photoFor[c.id]
-  const opposite = c.side === 'left' ? 'right' : 'left'
   return (
     <SectionShell index={index}>
       <div className="layer bgword" data-speed="0.55" aria-hidden="true">
@@ -43,7 +33,6 @@ export function Chapter({ index }: { index: number }) {
           }
         />
       </div>
-      {photo && <PhotoSlot slot={photo.slot} side={opposite === 'left' ? 'left' : 'right'} tilt={photo.tilt} />}
     </SectionShell>
   )
 }

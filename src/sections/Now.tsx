@@ -1,8 +1,6 @@
 import { chapters, closing, indexOf } from '../content/story'
 import { SectionShell } from './SectionShell'
 import { ScrubText } from '../ui/ScrubText'
-import { MagneticButton } from '../ui/MagneticButton'
-import { PhotoSlot } from '../ui/PhotoSlot'
 import { store, pinnedProgress } from '../core/store'
 import { useRef } from 'react'
 import { smooth } from '../core/math'
@@ -10,19 +8,17 @@ import { useTicker } from '../core/useTicker'
 
 const I = indexOf('now')
 
-/** 14 — NOW (closing): final words and the "This is just the beginning." call to action. */
+/** 14 — NOW (closing): the final words, then "This is just the beginning." as a glowing closing statement (no link). */
 export function NowSection() {
   const c = chapters[I]
-  const cta = useRef<HTMLDivElement>(null)
+  const line = useRef<HTMLDivElement>(null)
 
-  // the button arrives late in the section as the camera clears the cage
+  // the closing line arrives late in the section, as the music swells and the camera clears the cage
   useTicker(() => {
-    if (store.reduced || !cta.current) return
-    const p = pinnedProgress(I)
-    const v = smooth(0.5, 0.72, p)
-    cta.current.style.opacity = String(v)
-    cta.current.style.transform = `translate3d(0, ${(1 - v) * 40}px, 0)`
-    cta.current.style.pointerEvents = v > 0.6 ? 'auto' : 'none'
+    if (store.reduced || !line.current) return
+    const v = smooth(0.5, 0.72, pinnedProgress(I))
+    line.current.style.opacity = String(v)
+    line.current.style.transform = `translate3d(0, ${(1 - v) * 30}px, 0) scale(${0.94 + 0.06 * v})`
   })
 
   return (
@@ -41,12 +37,12 @@ export function NowSection() {
           noExit
           header={<span className="eyebrow"><i />14 / 14 — Now</span>}
         />
-        <div ref={cta} className="cta-wrap">
-          {/* [CONTACT PLACEHOLDER] set closing.ctaHref in src/content/story.ts to your real link */}
-          <MagneticButton href={closing.ctaHref} className="cta">{closing.cta}</MagneticButton>
+        <div ref={line} className="closing-line">
+          <span className="closing-rule" aria-hidden="true" />
+          <p>{closing.line}</p>
+          <span className="closing-rule" aria-hidden="true" />
         </div>
       </div>
-      <PhotoSlot slot="now" side="right" tilt={3} />
     </SectionShell>
   )
 }

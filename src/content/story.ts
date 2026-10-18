@@ -223,9 +223,7 @@ export const milestoneP = [0.1, 0.3, 0.5, 0.7, 0.9]
 
 // ---- Closing ---------------------------------------------------------------
 export const closing = {
-  cta: 'This is just the beginning.',
-  /** [CONTACT PLACEHOLDER] — put your real contact / social link here (e.g. https://instagram.com/yourname or mailto:you@email.com) */
-  ctaHref: '#contact-placeholder',
+  line: 'This is just the beginning.',
 }
 
 // ---- Floating words for the "research" scene ---------------------------------
