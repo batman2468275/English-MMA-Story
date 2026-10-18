@@ -1,7 +1,5 @@
 import { useState } from 'react'
-// TEMPORARY: routed through select.ts so ?music=experimental can preview the draft score (default = engine.ts, unchanged).
-// To undo, change this back to '../audio/engine' and delete src/audio/select.ts.
-import { audio, wireAudio } from '../audio/select'
+import { audio, wireAudio } from '../audio/engine'
 
 /** Visible sound toggle (bottom-left). Audio is muted by default. */
 export function AudioToggle() {
