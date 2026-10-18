@@ -1,23 +1,94 @@
 import { useMemo } from 'react'
 import { Vector3 } from 'three'
-import { createFigure, solveArm, resetPose } from '../figure'
+import { createFigure, Figure, limitPose, liftAboveFloor, lookAt, resetPose, solveArm } from '../figure'
+import { resolveContacts } from '../contact'
 import { glowMaterial, rimMaterial } from '../materials'
 import { Cage } from '../Cage'
 import { ParticleField } from '../particles'
 import { Glow } from '../shapes'
 import { useSceneFrame, count } from '../hooks'
 import { setCam, keys } from '../camera'
-import { lerp, smooth } from '../../core/math'
+import { clamp01, easeInOut, lerp, smooth } from '../../core/math'
 import { store } from '../../core/store'
 import { VAN_HIT } from '../../core/fx'
 
 /**
- * 04 — JOSHUA VAN: arena, spotlight, two silhouettes. At VAN_HIT Van lands the shot, Royval drops and Van follows him
- * to the ground throwing strikes. All choreography is a pure function of scroll progress (reversible).
- * The white flash / shake / chroma glitch / shockwave come from core/fx.ts, the hand overlay from ui/FxOverlay.tsx.
+ * 04 — JOSHUA VAN. A real exchange, built from weighted phases (all pure functions of scroll progress, so it scrubs both ways):
+ *
+ *   feel-out  (0 → .33)    both fighters bounce on planted feet, feint and circle
+ *   wind-up   (.338 → .39) Van loads the overhand: hand cocks back behind the head, torso twists away, weight shifts
+ *   impact    (.40)        the fist arrives on Royval's jaw (hand meets the head *surface*, never inside it)
+ *   follow    (.40 → .44)  the punch carries through, torso rotates, Royval's head whips and his knees go
+ *   fall      (.40 → .56)  stagger → collapse → he lands on his back (body rests on the mat, limbs flop in sequence)
+ *   follow-up (.44 → .56)  Van steps in and drops to one knee beside his torso
+ *   pound     (.52 → .95)  alternating strikes: wind-up high, drive down onto the head surface, rebound — Royval covers up, then goes limp
+ *
+ * Feet are planted with `restOnFloor`, bodies are pushed apart by the contact solver, and hands are IK-pinned to the *surface*
+ * of the head, so nothing intersects. Flash / shake / shockwave / hand overlay come from core/fx.ts + ui/FxOverlay.tsx.
  */
-const tmp = new Vector3()
-const head = new Vector3()
+const S0 = 0.338
+const S1 = 0.438
+const N_STRIKES = 11
+
+const v = () => new Vector3()
+const roy_head = v()
+const van_head = v()
+const shR = v()
+const shL = v()
+const target = v()
+const tmp = v()
+const G = v()
+const C0 = v()
+const M = v()
+const I = v()
+const F = v()
+const pole = v()
+const right = v()
+const fwd = v()
+const side = v()
+const tmpA = v()
+const tmpB = v()
+
+const easeOutQuad = (x: number) => 1 - (1 - x) * (1 - x)
+const easeIn2 = (x: number) => x * x
+
+/** Orthodox fighting stance, FK only: planted staggered feet, knees soft, guard up with elbows out of the ribs. */
+function stance(f: Figure, t: number, ph: number, amt = 1) {
+  const bob = Math.sin(t * 5.2 + ph) * amt
+  const { j } = f
+  j.spine.rotation.x = 0.12 + 0.025 * bob
+  j.hpL.rotation.x = -0.34 + 0.06 * bob
+  j.knL.rotation.x = 0.3 - 0.05 * bob
+  j.hpR.rotation.x = 0.3 - 0.06 * bob
+  j.knR.rotation.x = 0.2 + 0.05 * bob
+  j.hpL.rotation.z = 0.1
+  j.hpR.rotation.z = -0.16
+  j.shL.rotation.x = -1.1
+  j.shL.rotation.z = 0.32
+  j.elL.rotation.x = -1.9
+  j.shR.rotation.x = -1.0
+  j.shR.rotation.z = -0.32
+  j.elR.rotation.x = -1.9
+  j.head.rotation.x = 0.1
+}
+
+/** Cubic-ish path through wind-up → travel → impact → follow-through for one punch (s: 0..1, impact at s = 0.62). */
+function strikePath(s: number, out: Vector3, g: Vector3, c0: Vector3, m: Vector3, i: Vector3, f: Vector3) {
+  if (s < 0.35) {
+    // anticipation: the hand loads back and up, slowly, with a tiny extra pull at the end
+    const e = easeInOut(s / 0.35)
+    return out.copy(g).lerp(c0, e).addScaledVector(c0.clone().sub(g).normalize(), 0.03 * Math.sin(Math.PI * e))
+  }
+  if (s < 0.62) {
+    // travel: accelerates hard along a quadratic arc
+    const t = easeIn2((s - 0.35) / 0.27)
+    const a = tmpA.copy(c0).lerp(m, t)
+    const b = tmpB.copy(m).lerp(i, t)
+    return out.copy(a).lerp(b, t)
+  }
+  // follow-through: decelerates past the target
+  return out.copy(i).lerp(f, easeOutQuad((s - 0.62) / 0.38))
+}
 
 export function Van() {
   const van = useMemo(() => createFigure(rimMaterial('#05060a', '#fff1d0', 2.2, 2.1), 1), [])
@@ -29,77 +100,200 @@ export function Van() {
     resetPose(van)
     resetPose(roy)
 
-    const bounce = Math.sin(t * 5.5) * 0.025
-    const strike = smooth(0.335, 0.385, p) * (1 - smooth(0.405, 0.43, p)) // Van's right hand reaches Royval's head
-    const fall = smooth(VAN_HIT, 0.5, p) // Royval goes down
-    const mount = smooth(0.47, 0.57, p) // Van drops onto him
+    // ================================================== phases
+    const sRaw = (p - S0) / (S1 - S0)
+    const sP = clamp01(sRaw)
+    const strikeW = smooth(S0 - 0.02, S0 + 0.012, p) * (1 - smooth(S1 + 0.005, S1 + 0.045, p))
+    const u = clamp01((p - VAN_HIT) / 0.16) // Royval's reaction timeline
+    const pre = smooth(VAN_HIT - 0.003, VAN_HIT + 0.004, p) // 0 → 1 the instant the punch lands
+    const fall = pre * (u < 0.35 ? 0.2 * easeOutQuad(u / 0.35) : 0.2 + 0.8 * easeInOut((u - 0.35) / 0.65))
+    const kneel = smooth(0.44, 0.545, p)
+    const gp = clamp01((p - 0.52) / 0.43) // ground-and-pound progress
+    const limp = smooth(0.62, 0.95, gp)
+    const snapT = (p - VAN_HIT) / 0.02
+    const bump = smooth(0, 0.15, snapT) * (1 - smooth(0.4, 1.7, snapT))
 
-    // ---------------- Royval (faces -X, falls backwards to +X)
+    // ================================================== ROYVAL (faces -X, falls backwards toward +X)
+    stance(roy, t, 1.7, 1 - fall)
     roy.root.rotation.y = -Math.PI / 2
-    roy.root.rotation.x = -fall * 1.52
-    roy.root.position.set(lerp(1.15, 1.75, fall) + strike * 0.12, lerp(0.95 + bounce, 0.23, fall), 0)
-    {
-      const g = 1 - fall
-      roy.j.spine.rotation.x = 0.12 * g
-      roy.j.hpL.rotation.x = -0.3 * g; roy.j.knL.rotation.x = 0.3 * g
-      roy.j.hpR.rotation.x = 0.32 * g; roy.j.knR.rotation.x = 0.2 * g
-      roy.j.shL.rotation.x = lerp(0.2, -1.15, g); roy.j.elL.rotation.x = lerp(-0.3, -1.9, g)
-      roy.j.shR.rotation.x = lerp(0.2, -1.0, g); roy.j.elR.rotation.x = lerp(-0.3, -1.9, g)
-      roy.j.head.rotation.x = -fall * 0.35 + strike * -0.3
-      roy.j.shL.rotation.z = fall * 0.5; roy.j.shR.rotation.z = -fall * 0.5
+    // stagger: head whips round, knees go, hips fold, then the whole body folds down
+    roy.j.head.rotation.y = -0.8 * bump
+    roy.j.head.rotation.x = -0.4 * bump + fall * 0.1
+    roy.j.spine.rotation.x = lerp(roy.j.spine.rotation.x, -0.25, pre * Math.min(1, u * 3)) // folds, doesn't snap straight
+    roy.j.hpL.rotation.x = lerp(roy.j.hpL.rotation.x, -0.95, fall)
+    roy.j.hpR.rotation.x = lerp(roy.j.hpR.rotation.x, -0.55, fall)
+    roy.j.knL.rotation.x = lerp(roy.j.knL.rotation.x, 1.25, fall)
+    roy.j.knR.rotation.x = lerp(roy.j.knR.rotation.x, 0.8, fall)
+    roy.j.hpL.rotation.z = lerp(roy.j.hpL.rotation.z, 0.2, fall)
+    roy.j.hpR.rotation.z = lerp(roy.j.hpR.rotation.z, -0.18, fall)
+    // arms are thrown up as he goes, then (if not covering) fall limp to the mat
+    const flail = Math.sin(Math.PI * clamp01(u / 0.55)) * pre
+    roy.j.shL.rotation.x = lerp(roy.j.shL.rotation.x, -2.1, flail)
+    roy.j.shR.rotation.x = lerp(roy.j.shR.rotation.x, -1.8, flail)
+    roy.j.elL.rotation.x = lerp(roy.j.elL.rotation.x, -0.4, flail)
+    roy.j.elR.rotation.x = lerp(roy.j.elR.rotation.x, -0.6, flail)
+    const dead = smooth(0.55, 0.9, u) * limp
+    roy.j.shL.rotation.x = lerp(roy.j.shL.rotation.x, -0.25, dead)
+    roy.j.shR.rotation.x = lerp(roy.j.shR.rotation.x, -0.25, dead)
+    roy.j.shL.rotation.z = lerp(roy.j.shL.rotation.z, 0.75, dead)
+    roy.j.shR.rotation.z = lerp(roy.j.shR.rotation.z, -0.75, dead)
+    roy.j.elL.rotation.x = lerp(roy.j.elL.rotation.x, -0.1, dead)
+    roy.j.elR.rotation.x = lerp(roy.j.elR.rotation.x, -0.1, dead)
+    // each ground strike jolts his head
+    if (gp > 0 && gp < 1) {
+      const ph = gp * N_STRIKES
+      const sIn = ph - Math.floor(ph)
+      const jolt = Math.exp(-Math.max(0, sIn - 0.62) * 14) * (sIn > 0.62 ? 1 : 0) * (1 - limp * 0.6)
+      roy.j.head.rotation.y += (Math.floor(ph) % 2 ? 1 : -1) * 0.22 * jolt
+      roy.j.head.rotation.x += -0.12 * jolt
     }
-
-    // ---------------- Van (faces +X)
-    van.root.rotation.y = Math.PI / 2
-    const lunge = strike
-    van.root.position.x = lerp(lerp(-1.15, -0.55, lunge), 2.15, mount)
-    van.root.position.y = lerp(0.95 + bounce, 0.74, mount)
-    van.root.rotation.x = mount * 0.95
-    {
-      const g = 1 - mount
-      van.j.hpL.rotation.x = lerp(-1.25, -0.4, g) ; van.j.knL.rotation.x = lerp(1.9, 0.3, g)
-      van.j.hpR.rotation.x = lerp(-1.25, 0.35, g); van.j.knR.rotation.x = lerp(1.9, 0.2, g)
-      van.j.shL.rotation.x = lerp(-1.1, -1.2, g); van.j.elL.rotation.x = lerp(-1.1, -1.8, g)
-      van.j.shR.rotation.x = lerp(-1.1, -1.0, g); van.j.elR.rotation.x = lerp(-1.1, -1.9, g)
-      van.j.head.rotation.x = -mount * 0.8
-    }
+    roy.root.rotation.x = -fall * 1.5
+    roy.root.position.x = 1.2 + 0.7 * fall * fall + (strikeW > 0 ? 0.08 * pre : 0)
+    roy.root.position.z = 0.02 * Math.sin(t * 5.2)
     roy.root.updateWorldMatrix(true, true)
+    liftAboveFloor(roy, 0, true)
+
+    // ================================================== VAN
+    stance(van, t, 0.4, 1 - kneel)
+    // set-up footwork during the feel-out: he glides in and out of range
+    const glide = Math.sin(t * 1.3) * 0.06 * (1 - smooth(0.25, 0.33, p))
+    const lunge = smooth(0.34, 0.405, p) // steps in with the overhand
+    van.root.rotation.y = lerp(Math.PI / 2, 0.38, kneel)
+    // kneel pose (half-kneel on the right knee) blended in
+    const { j } = van
+    j.hpL.rotation.x = lerp(j.hpL.rotation.x, -1.5, kneel)
+    j.knL.rotation.x = lerp(j.knL.rotation.x, 1.5, kneel)
+    j.hpR.rotation.x = lerp(j.hpR.rotation.x, 0.02, kneel)
+    j.knR.rotation.x = lerp(j.knR.rotation.x, 1.62, kneel)
+    j.hpL.rotation.z = lerp(j.hpL.rotation.z, 0.12, kneel)
+    j.hpR.rotation.z = lerp(j.hpR.rotation.z, -0.1, kneel)
+    // lunge: lead knee drives forward, rear leg extends
+    j.hpL.rotation.x += -0.4 * lunge * (1 - kneel)
+    j.knL.rotation.x += 0.35 * lunge * (1 - kneel)
+    j.hpR.rotation.x += 0.25 * lunge * (1 - kneel)
+    // torso twist for the overhand: loads away, then drives through
+    const twist =
+      sRaw < 0 ? 0 : sRaw < 0.35 ? -0.45 * easeInOut(sRaw / 0.35) : sRaw < 0.62 ? lerp(-0.45, 0.55, easeIn2((sRaw - 0.35) / 0.27)) : sRaw < 1 ? lerp(0.55, 0.15, easeInOut((sRaw - 0.62) / 0.38)) : 0.15 * (1 - kneel)
+    j.spine.rotation.y = twist * (1 - kneel)
+    j.spine.rotation.x = lerp(j.spine.rotation.x, 1.15, kneel) + 0.08 * lunge * (1 - kneel)
+    j.head.rotation.x = lerp(j.head.rotation.x, 0.4, kneel)
+    // placement: stands off at range, steps in, then drops beside Royval's torso on the far (−Z) side
+    roy.j.head.getWorldPosition(roy_head)
+    const standX = -1.28 + glide + 0.6 * lunge
+    van.root.position.x = lerp(standX, roy_head.x - 0.62, kneel)
+    van.root.position.z = lerp(0, -0.58, kneel)
+    van.root.position.y = 0.98
     van.root.updateWorldMatrix(true, true)
-    roy.j.head.getWorldPosition(head)
-    head.y += 0.12
+    liftAboveFloor(van, 0, true)
 
-    // the knock-down shot
-    if (strike > 0.001) {
-      tmp.copy(head)
-      solveArm(van, 'R', tmp, strike)
-    }
-    // ground-and-pound: alternate hands hammering toward Royval's head
-    if (mount > 0.01) {
-      const ph = p * 330
-      const hit = (ph0: number) => Math.max(0, Math.sin(ph0)) ** 2
-      tmp.copy(head).add(new Vector3(-0.05, 0.15 + 0.55 * (1 - hit(ph)), 0.12))
-      solveArm(van, 'R', tmp, mount)
-      tmp.copy(head).add(new Vector3(-0.05, 0.15 + 0.55 * (1 - hit(ph + Math.PI)), -0.12))
-      solveArm(van, 'L', tmp, mount)
+    // keep the two bodies from intersecting (forearms are free: hands are placed on surfaces by IK)
+    resolveContacts([van, roy], { iterations: 3, margin: 0.01 })
+    van.root.position.y = Math.max(van.root.position.y, 0)
+    liftAboveFloor(van, 0, true)
+    liftAboveFloor(roy, 0, true)
+    limitPose(van)
+    limitPose(roy)
+
+    roy.headC.getWorldPosition(roy_head)
+    van.headC.getWorldPosition(van_head)
+    lookAt(van, roy_head, 1)
+    lookAt(roy, van_head, 1 - fall)
+
+    // ================================================== hands
+    const k = 1
+    const psi = van.root.rotation.y
+    fwd.set(Math.sin(psi), 0, Math.cos(psi))
+    right.set(-Math.cos(psi), 0, Math.sin(psi)) // the fighter's right-hand side in world space
+
+    // Royval covers his face, then his guard drops as he is knocked out of it
+    const cover = smooth(0.12, 0.3, u) * (1 - limp) * pre * smooth(0.35, 0.6, fall + 0.4 * u)
+    if (cover > 0.02) {
+      for (const sd of [1, -1] as const) {
+        target.set(roy_head.x - 0.02, roy_head.y + 0.3, roy_head.z + sd * 0.13)
+        pole.set(0, 0.4, sd * 1)
+        solveArm(roy, sd === 1 ? 'L' : 'R', target, cover, pole)
+      }
     }
 
-    // ---------------- camera: side view, slow-motion push-in after impact
-    const a = p
-    const pos = keys(a, [
-      { p: 0, v: [-0.4, 1.7, 6.8] },
-      { p: 0.32, v: [0.2, 1.6, 5.4] },
-      { p: 0.42, v: [0.6, 1.35, 4.6] },
-      { p: 0.7, v: [1.4, 1.2, 3.6] },
-      { p: 0.95, v: [1.95, 1.05, 2.5] },
-      { p: 1, v: [2.0, 1.0, 2.25] },
+    // the knock-down overhand right (standing) -------------------------------------------------------------
+    if (strikeW > 0.001 && kneel < 0.6) {
+      van.tipR.getWorldPosition(G) // current guard position = start of the path
+      van.j.shR.getWorldPosition(shR)
+      // impact point on the *surface* of his jaw, on the side facing Van
+      side.copy(shR).sub(roy_head)
+      side.y *= 0.25
+      side.normalize()
+      I.copy(roy_head).addScaledVector(side, 0.115 * k + 0.04)
+      I.y -= 0.03
+      C0.copy(van_head).addScaledVector(fwd, -0.2).addScaledVector(right, 0.2)
+      C0.y += 0.1
+      M.copy(C0).lerp(I, 0.5)
+      M.y += 0.3
+      M.addScaledVector(right, 0.08)
+      F.copy(I).addScaledVector(fwd, 0.3).addScaledVector(right, -0.08)
+      F.y -= 0.1
+      strikePath(sP, target, G, C0, M, I, F)
+      pole.copy(right).multiplyScalar(1).add(tmp.set(0, 0.6, 0))
+      solveArm(van, 'R', target, strikeW * (1 - kneel), pole)
+    }
+
+    // ground-and-pound: alternating hands, each with wind-up → drive → contact → rebound ----------------------------
+    if (kneel > 0.2) {
+      const ph = Math.max(0, gp) * N_STRIKES
+      const idx = Math.floor(ph)
+      const sIn = ph - idx
+      const active = smooth(0.0, 0.05, gp) * kneel
+      for (const sd of [1, -1] as const) {
+        const mine = (idx % 2 === 0) === (sd === -1) // right hand on even strikes
+        const sh = sd === 1 ? shL : shR
+        van.j[sd === 1 ? 'shL' : 'shR'].getWorldPosition(sh)
+        // support hand: posts on his chest / shoulder, forearm vertical, taking some of the weight
+        const post = tmp.copy(roy_head).add(side.set(0.28, -0.04, sd * 0.16 - 0.1))
+        post.y = Math.max(0.08, post.y - 0.06)
+        let w = 0.9 * kneel
+        if (mine && gp > 0.001 && gp < 1) {
+          const wind = easeInOut(clamp01(sIn / 0.45))
+          const drive = easeIn2(clamp01((sIn - 0.45) / 0.17))
+          const rebound = easeOutQuad(clamp01((sIn - 0.7) / 0.3))
+          // surface of the face (top, since he is lying face up), slightly off-centre for each hand
+          I.set(roy_head.x - sd * 0.0, roy_head.y + 0.115 + 0.04, roy_head.z + sd * 0.035)
+          // wind-up position: high, behind, slightly outward
+          C0.set(I.x - 0.06, I.y + 0.62 * (1 - 0.15 * (idx % 3)), I.z - 0.2 + sd * 0.05)
+          if (sIn < 0.45) target.copy(post).lerp(C0, wind)
+          else if (sIn < 0.62) target.copy(C0).lerp(I, drive)
+          else if (sIn < 0.7) target.copy(I)
+          else target.copy(I).lerp(C0, rebound * 0.7)
+          w = Math.max(w, active)
+          pole.set(0, 1, -0.8)
+          solveArm(van, sd === 1 ? 'L' : 'R', target, w, pole)
+        } else if (kneel > 0.3) {
+          pole.set(0, 0.5, -0.5)
+          solveArm(van, sd === 1 ? 'L' : 'R', post, w * 0.8, pole)
+        }
+      }
+    }
+
+    if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__van = { van, roy }
+
+    // ================================================== camera: side view, then a slow-motion push-in
+    // The camera is framed *relative to the fighters* (their midpoint), so both are always in shot whatever the choreography does.
+    roy.root.getWorldPosition(roy_head)
+    van.root.getWorldPosition(van_head)
+    const midX = (roy_head.x + van_head.x) / 2
+    const midZ = (roy_head.z + van_head.z) / 2
+    const spread = Math.hypot(roy_head.x - van_head.x, roy_head.z - van_head.z)
+    const off = keys(p, [
+      { p: 0, v: [-0.3, 0.75, 6.4] }, // dx, height, distance
+      { p: 0.3, v: [0.0, 0.6, 5.4] },
+      { p: 0.4, v: [0.3, 0.45, 4.5] },
+      { p: 0.55, v: [0.2, 0.3, 3.9] },
+      { p: 0.8, v: [0.1, 0.25, 3.3] },
+      { p: 1, v: [0.1, 0.15, 2.6] },
     ])
-    const look = keys(a, [
-      { p: 0, v: [0, 1.2, 0] },
-      { p: 0.4, v: [0.3, 1.1, 0] },
-      { p: 0.7, v: [1.6, 0.7, 0] },
-      { p: 1, v: [2.3, 0.55, 0] },
-    ])
-    setCam(3, state.camera as never, pos, look, 52 - smooth(0.4, 1, p) * 18, dt, { lambda: 4.5, parallax: 0.12 })
+    const dist = off[2] + Math.max(0, spread - 1.4) * 0.9
+    const pos: [number, number, number] = [midX + off[0], 0.6 + off[1], midZ + dist]
+    const look: [number, number, number] = [midX, lerp(1.15, 0.45, smooth(0.35, 0.6, p)), midZ]
+    setCam(3, state.camera as never, pos, look, 52 - smooth(0.4, 1, p) * 14, dt, { lambda: 4.5, parallax: 0.12 })
   })
 
   return (
@@ -121,7 +315,6 @@ export function Van() {
       <Glow position={[0, 0.3, 0]} size={[12, 5]} color="#ffffff" opacity={0.25} />
       <primitive object={van.root} />
       <primitive object={roy.root} />
-      {/* crowd bokeh behind the cage + dust, pushed outward by the shockwave */}
       <ParticleField count={count(260)} box={[44, 14, 30]} vel={[0, 0.02, 0]} size={30} color="#ffb48a" opacity={0.55} position={[0, 7, -22]} seed={31} />
       <ParticleField
         count={count(420)}

@@ -1,24 +1,34 @@
 import {
+  BoxGeometry,
   CapsuleGeometry,
+  CylinderGeometry,
   Group,
   Material,
   Mesh,
+  MathUtils,
   Object3D,
   Quaternion,
   SphereGeometry,
-  BoxGeometry,
   Vector3,
 } from 'three'
 
 /**
- * A tiny stylised low-poly humanoid built from capsules.
- * Origin = pelvis. Standing: feet ≈ 0.95 below the origin, head top ≈ 0.95 above.
- * Every limb segment hangs along local -Y from its pivot, so
- * rotation.x = -π/2 swings a hanging arm to point forward (+Z).
+ * A stylised low-poly humanoid. Origin = pelvis. Standing: feet ≈ 0.98 below the origin, head top ≈ 0.95 above.
  *
- * `solveArm` / `solveLeg` are a small analytic 2-bone IK so hands/feet can
- * be pinned onto things (debris, rings, another fighter's neck…).
+ * v2 anatomy: tapered limb segments with ball joints, a two-part torso (abdomen + ribcage) with shoulder caps, neck + jaw,
+ * flat hands and wedge feet. Every limb segment hangs along local -Y from its pivot, so rotation.x = -π/2 swings a
+ * hanging arm to point forward (+Z). Elbows/knees are hinges (flex only) — see `limitPose`.
+ *
+ * `solveArm` / `solveLeg` are a two-bone IK so hands/feet can be pinned onto things (debris, a partner's neck, the floor).
+ * `segments` describes the body as capsules for the contact solver in scene/contact.ts.
  */
+export interface Segment {
+  a: Object3D
+  b: Object3D
+  r: number
+  kind: 'torso' | 'head' | 'uarm' | 'farm' | 'thigh' | 'shin'
+}
+
 export interface Figure {
   root: Group
   j: {
@@ -37,15 +47,20 @@ export interface Figure {
   tipR: Object3D
   ftL: Object3D
   ftR: Object3D
+  neck: Object3D // base of the neck (collar line)
+  headC: Object3D // centre of the skull
+  segments: Segment[]
 }
 
-const capsule = (r: number, len: number) => new CapsuleGeometry(r, Math.max(0.001, len - 2 * r), 3, 8)
+const sph = (r: number, w = 12, h = 8) => new SphereGeometry(r, w, h)
 
-function segment(r: number, len: number, mat: Material) {
+/** A limb piece hanging from its pivot: tapered cylinder + the pivot's ball joint. */
+function piece(rTop: number, rBot: number, len: number, mat: Material, joint = true) {
   const g = new Group()
-  const m = new Mesh(capsule(r, len), mat)
+  const m = new Mesh(new CylinderGeometry(rTop, rBot, len, 10, 1), mat)
   m.position.y = -len / 2
   g.add(m)
+  if (joint) g.add(new Mesh(sph(rTop * 1.04), mat))
   return g
 }
 
@@ -54,62 +69,89 @@ export function createFigure(mat: Material, scale = 1): Figure {
   root.rotation.order = 'YXZ' // yaw first, then lean/fall — so "fall backwards" is rotation.x
   root.scale.setScalar(scale)
 
-  // hips
-  const hips = new Mesh(new CapsuleGeometry(0.12, 0.12, 3, 8), mat)
+  // ---- pelvis
+  const hips = new Mesh(new CapsuleGeometry(0.11, 0.14, 4, 10), mat)
   hips.rotation.z = Math.PI / 2
+  hips.scale.set(1, 1, 0.86)
   root.add(hips)
 
-  // spine / torso
+  // ---- spine: abdomen + ribcage
   const spine = new Group()
   spine.position.y = 0.04
   root.add(spine)
-  const torso = new Mesh(capsule(0.17, 0.62), mat)
-  torso.position.y = 0.3
-  torso.scale.set(1.12, 1, 0.78)
-  spine.add(torso)
+  const abdomen = new Mesh(new CapsuleGeometry(0.118, 0.16, 4, 10), mat)
+  abdomen.position.y = 0.11
+  abdomen.scale.set(1.08, 1, 0.8)
+  spine.add(abdomen)
+  const chest = new Mesh(new CylinderGeometry(0.178, 0.138, 0.36, 12, 1), mat)
+  chest.position.y = 0.36
+  chest.scale.set(1.16, 1, 0.74)
+  spine.add(chest)
+  const chestTop = new Mesh(sph(0.178, 12, 6), mat)
+  chestTop.position.y = 0.54
+  chestTop.scale.set(1.16, 0.45, 0.74)
+  spine.add(chestTop)
+  const neck = new Object3D()
+  neck.position.y = 0.57
+  spine.add(neck)
+  const neckMesh = new Mesh(new CylinderGeometry(0.048, 0.056, 0.12, 8), mat)
+  neckMesh.position.y = 0.04
+  neck.add(neckMesh)
 
-  // neck + head
+  // ---- head
   const head = new Group()
-  head.position.y = 0.66
+  head.position.y = 0.64
   spine.add(head)
-  const neck = new Mesh(capsule(0.05, 0.14), mat)
-  neck.position.y = 0.02
-  head.add(neck)
-  const skull = new Mesh(new SphereGeometry(0.115, 12, 10), mat)
-  skull.position.y = 0.15
-  skull.scale.set(0.92, 1.08, 1)
+  const skull = new Mesh(sph(0.105, 14, 10), mat)
+  skull.position.y = 0.13
+  skull.scale.set(0.92, 1.08, 1.02)
   head.add(skull)
+  const jaw = new Mesh(sph(0.066, 10, 8), mat)
+  jaw.position.set(0, 0.07, 0.045)
+  jaw.scale.set(0.95, 0.8, 1)
+  head.add(jaw)
+  const headC = new Object3D()
+  headC.position.y = 0.13
+  head.add(headC)
 
-  // arms
+  // ---- arms
   const mkArm = (side: 1 | -1) => {
-    const sh = segment(0.058, 0.3, mat)
-    sh.position.set(0.24 * side, 0.52, 0)
+    const sh = piece(0.058, 0.046, 0.3, mat)
+    sh.position.set(0.26 * side, 0.5, 0)
+    // rounded shoulder cap so the upper arm blends into the ribcage
+    const cap = new Mesh(sph(0.07, 10, 8), mat)
+    cap.scale.set(1, 0.9, 0.95)
+    sh.add(cap)
     spine.add(sh)
-    const el = segment(0.05, 0.3, mat)
+    const el = piece(0.046, 0.036, 0.28, mat)
     el.position.y = -0.3
     sh.add(el)
-    const hand = new Mesh(new SphereGeometry(0.058, 8, 6), mat)
-    hand.position.y = -0.32
+    const hand = new Mesh(sph(0.075, 10, 8), mat)
+    hand.scale.set(0.62, 1, 0.5)
+    hand.position.y = -0.33
     el.add(hand)
     const tip = new Object3D()
-    tip.position.y = -0.36
+    tip.position.y = -0.38
     el.add(tip)
     return { sh, el, tip }
   }
   const aL = mkArm(1)
   const aR = mkArm(-1)
 
-  // legs
+  // ---- legs
   const mkLeg = (side: 1 | -1) => {
-    const hp = segment(0.085, 0.46, mat)
-    hp.position.set(0.1 * side, -0.02, 0)
+    const hp = piece(0.09, 0.066, 0.46, mat)
+    hp.position.set(0.095 * side, -0.02, 0)
     root.add(hp)
-    const kn = segment(0.068, 0.46, mat)
+    const kn = piece(0.064, 0.046, 0.5, mat)
     kn.position.y = -0.46
     hp.add(kn)
-    const foot = new Mesh(new BoxGeometry(0.1, 0.06, 0.26), mat)
-    foot.position.set(0, -0.47, 0.06)
+    const foot = new Mesh(new BoxGeometry(0.1, 0.06, 0.25), mat)
+    foot.position.set(0, -0.47, 0.07)
     kn.add(foot)
+    const toes = new Mesh(new BoxGeometry(0.095, 0.04, 0.08), mat)
+    toes.position.set(0, -0.485, 0.2)
+    kn.add(toes)
     const ft = new Object3D()
     ft.position.y = -0.5
     kn.add(ft)
@@ -118,14 +160,67 @@ export function createFigure(mat: Material, scale = 1): Figure {
   const lL = mkLeg(1)
   const lR = mkLeg(-1)
 
-  return {
+  const fig: Figure = {
     root,
     j: { spine, head, shL: aL.sh, shR: aR.sh, elL: aL.el, elR: aR.el, hpL: lL.hp, hpR: lR.hp, knL: lL.kn, knR: lR.kn },
     tipL: aL.tip,
     tipR: aR.tip,
     ftL: lL.ft,
     ftR: lR.ft,
+    neck,
+    headC,
+    segments: [],
   }
+  fig.segments = [
+    { a: root, b: neck, r: 0.17, kind: 'torso' },
+    { a: headC, b: headC, r: 0.115, kind: 'head' },
+    { a: aL.sh, b: aL.el, r: 0.06, kind: 'uarm' },
+    { a: aR.sh, b: aR.el, r: 0.06, kind: 'uarm' },
+    { a: aL.el, b: aL.tip, r: 0.05, kind: 'farm' },
+    { a: aR.el, b: aR.tip, r: 0.05, kind: 'farm' },
+    { a: lL.hp, b: lL.kn, r: 0.088, kind: 'thigh' },
+    { a: lR.hp, b: lR.kn, r: 0.088, kind: 'thigh' },
+    { a: lL.kn, b: lL.ft, r: 0.064, kind: 'shin' },
+    { a: lR.kn, b: lR.ft, r: 0.064, kind: 'shin' },
+  ]
+  return fig
+}
+
+// --------------------------------------------------------------------------
+// Joint limits
+// --------------------------------------------------------------------------
+const clampRot = (o: Object3D, ax: 'x' | 'y' | 'z', lo: number, hi: number) => {
+  o.rotation[ax] = MathUtils.clamp(o.rotation[ax], lo, hi)
+}
+
+/**
+ * Keeps FK-driven joints inside human limits: elbows and knees are pure hinges that only flex, shoulders/hips/spine/head
+ * stay inside plausible ranges, and shoulders never adduct into the ribcage. Call after setting FK values, before IK.
+ */
+export function limitPose(f: Figure) {
+  const { j } = f
+  for (const e of [j.elL, j.elR]) {
+    clampRot(e, 'x', -2.75, 0.04)
+    e.rotation.y = 0
+    e.rotation.z = 0
+  }
+  for (const k of [j.knL, j.knR]) {
+    clampRot(k, 'x', 0, 2.65)
+    k.rotation.y = 0
+    k.rotation.z = 0
+  }
+  clampRot(j.shL, 'x', -3.3, 1.2)
+  clampRot(j.shR, 'x', -3.3, 1.2)
+  // never let a hanging arm swing into the torso: minimum outward abduction, scaled by how far forward/back it is
+  clampRot(j.shL, 'z', 0.06, 2.4)
+  clampRot(j.shR, 'z', -2.4, -0.06)
+  clampRot(j.hpL, 'x', -2.1, 0.7)
+  clampRot(j.hpR, 'x', -2.1, 0.7)
+  clampRot(j.hpL, 'z', -0.1, 0.9)
+  clampRot(j.hpR, 'z', -0.9, 0.1)
+  clampRot(j.spine, 'x', -0.6, 1.3)
+  clampRot(j.head, 'x', -0.9, 0.7)
+  clampRot(j.head, 'y', -1.1, 1.1)
 }
 
 // --------------------------------------------------------------------------
@@ -186,7 +281,6 @@ function solveChain(
 
   aim(upper, _e)
   upper.updateWorldMatrix(true, true)
-  // aim lower toward the (clamped) target
   const T = S.clone().addScaledVector(d, dist)
   aim(lower, T)
 
@@ -205,7 +299,7 @@ const ARM_POLE_R = new Vector3(-0.6, -0.8, -0.3)
 export function solveArm(fig: Figure, side: 'L' | 'R', target: Vector3, weight = 1, pole?: Vector3) {
   const sh = side === 'L' ? fig.j.shL : fig.j.shR
   const el = side === 'L' ? fig.j.elL : fig.j.elR
-  solveChain(fig, sh, el, 0.3, 0.36, target, pole ?? (side === 'L' ? ARM_POLE_L : ARM_POLE_R), weight)
+  solveChain(fig, sh, el, 0.3, 0.38, target, pole ?? (side === 'L' ? ARM_POLE_L : ARM_POLE_R), weight)
 }
 
 /** Pin a foot to a world-space target. */
@@ -219,5 +313,68 @@ export function solveLeg(fig: Figure, side: 'L' | 'R', target: Vector3, weight =
 export function resetPose(f: Figure) {
   const { j } = f
   for (const o of [j.spine, j.head, j.shL, j.shR, j.elL, j.elR, j.hpL, j.hpR, j.knL, j.knR]) o.rotation.set(0, 0, 0)
+  // arms hang slightly away from the ribcage by default (never through it)
+  j.shL.rotation.z = 0.1
+  j.shR.rotation.z = -0.1
   f.root.rotation.set(0, 0, 0)
+}
+
+// --------------------------------------------------------------------------
+// Grounding / gaze helpers
+// --------------------------------------------------------------------------
+const _w = new Vector3()
+
+/** Lower/raise the figure so its lower foot is exactly on the floor (feet never float or sink). */
+export function groundFigure(f: Figure, floorY = 0) {
+  f.root.updateWorldMatrix(true, true)
+  f.ftL.getWorldPosition(_w)
+  const a = _w.y
+  f.ftR.getWorldPosition(_w)
+  f.root.position.y += floorY - Math.min(a, _w.y)
+  f.root.updateWorldMatrix(true, true)
+}
+
+/** Move the figure vertically so `joint` rests at height y (e.g. a kneeling knee on the mat, a hip on a seat). */
+export function plantJoint(f: Figure, joint: Object3D, y: number) {
+  f.root.updateWorldMatrix(true, true)
+  joint.getWorldPosition(_w)
+  f.root.position.y += y - _w.y
+  f.root.updateWorldMatrix(true, true)
+}
+
+/**
+ * Safety net for ground work: if any extremity (feet, knees, hands, head, hips) would sink below the floor, raise the whole
+ * figure just enough. Prevents bodies clipping into the mat during falls and lying poses.
+ */
+export function liftAboveFloor(f: Figure, floorY = 0, settle = false) {
+  f.root.updateWorldMatrix(true, true)
+  const k = f.root.getWorldScale(_w).x
+  const pts: [Object3D, number][] = [
+    [f.root, 0.1], [f.neck, 0.15], [f.headC, 0.11], [f.tipL, 0.05], [f.tipR, 0.05],
+    [f.ftL, 0.0], [f.ftR, 0.0], [f.j.knL, 0.065], [f.j.knR, 0.065], [f.j.elL, 0.05], [f.j.elR, 0.05],
+  ]
+  let lowest = Infinity
+  for (const [o, r] of pts) {
+    o.getWorldPosition(_w)
+    lowest = Math.min(lowest, _w.y - r * k)
+  }
+  const shift = floorY - lowest
+  // `settle` also lowers a hovering body so it rests *on* the mat instead of floating above it
+  if (shift > 0 || settle) {
+    f.root.position.y += shift
+    f.root.updateWorldMatrix(true, true)
+  }
+}
+
+const _hp = new Vector3()
+/** Turn the head toward a world point (with limits). amount 0..1. */
+export function lookAt(f: Figure, target: Vector3, amount = 1) {
+  const h = f.j.head
+  h.parent!.updateWorldMatrix(true, false)
+  h.parent!.worldToLocal(_hp.copy(target))
+  _hp.y -= 0.65
+  const yaw = Math.atan2(_hp.x, _hp.z)
+  const pitch = -Math.atan2(_hp.y, Math.hypot(_hp.x, _hp.z))
+  h.rotation.y = MathUtils.clamp(yaw, -1.0, 1.0) * amount
+  h.rotation.x = MathUtils.clamp(pitch, -0.6, 0.55) * amount
 }

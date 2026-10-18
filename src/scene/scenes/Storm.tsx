@@ -13,7 +13,9 @@ import {
   Vector3,
 } from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import { createFigure, resetPose, solveArm } from '../figure'
+import { createFigure, limitPose, resetPose, solveArm } from '../figure'
+import { clearArms } from '../contact'
+import { store } from '../../core/store'
 import { glowMaterial, rimMaterial } from '../materials'
 import { Cage } from '../Cage'
 import { Glow, sharedSoft } from '../shapes'
@@ -43,12 +45,13 @@ import { waveH, waveSlope } from './storm/waves'
  * The swimmer swims toward +Z. The "near" side (toward the camera) is +X, so its LEFT arm does the reaching.
  */
 const LEN = 0.105 // scroll length of one attempt
-interface ObjSpec { a0: number; S: [number, number]; R: [number, number]; E: [number, number]; ho: number; sink: number; dipK: number; float: number; spin: number }
+interface ObjSpec { a0: number; S: [number, number]; R: [number, number]; E: [number, number]; ho: number; sink: number; dipK: number; float: number; grip: number; spin: number }
+/** `float` = how high the object's centre rides above the waterline (props sit half-submerged); `grip` = height of its top surface above the centre. */
 const OBJS: ObjSpec[] = [
-  { a0: 0.19, S: [0.85, 0], R: [0.58, 1.1], E: [2.9, -3.6], ho: 0, sink: 0, dipK: 0.7, float: 0.14, spin: 7 }, // basketball: bounces away
-  { a0: 0.29, S: [0.55, 0], R: [0.55, 1.14], E: [1.7, -1.8], ho: 0.02, sink: 0.6, dipK: 0.9, float: 0.05, spin: 1.2 }, // laptop: goes under
-  { a0: 0.39, S: [1.0, 0], R: [0.6, 1.12], E: [3.4, -5.0], ho: 0, sink: 0.05, dipK: 0.8, float: 0.07, spin: 5.5 }, // palette: spins off
-  { a0: 0.49, S: [0.7, 0], R: [0.58, 1.18], E: [1.1, -2.4], ho: 0.06, sink: 0.2, dipK: 1.7, float: 0.06, spin: 2 }, // wood: the hardest to lose
+  { a0: 0.19, S: [0.85, 0], R: [0.58, 1.1], E: [2.9, -3.6], ho: 0, sink: 0, dipK: 0.7, float: 0.08, grip: 0.28, spin: 7 }, // basketball: bounces away
+  { a0: 0.29, S: [0.55, 0], R: [0.55, 1.14], E: [1.7, -1.8], ho: 0.02, sink: 0.6, dipK: 0.9, float: 0.05, grip: 0.1, spin: 1.2 }, // laptop: goes under
+  { a0: 0.39, S: [1.0, 0], R: [0.6, 1.12], E: [3.4, -5.0], ho: 0, sink: 0.05, dipK: 0.8, float: 0.04, grip: 0.06, spin: 5.5 }, // palette: spins off
+  { a0: 0.49, S: [0.7, 0], R: [0.58, 1.18], E: [1.1, -2.4], ho: 0.06, sink: 0.2, dipK: 1.7, float: 0.045, grip: 0.09, spin: 2 }, // wood: the hardest to lose
 ]
 
 const STRIKES: [number, number][] = [
@@ -245,9 +248,17 @@ export function Storm() {
       if (rW > reachW) {
         reachW = rW
         st.target.copy(pos)
-        st.target.y += i === 1 ? 0.16 : 0.1
+        st.target.y += o.grip // the hand rests on the object's top surface, not inside it
       }
       dip = Math.max(dip, dp * o.dipK)
+
+      // label: fades in as the object drifts into reach, stays while it's being fought for, fades as it slips away
+      const lab = store.stormLabels[i]
+      const lo = smooth(-0.02, 0.2, s) * (1 - smooth(0.78 + o.ho, 1.08 + o.ho, s))
+      st.tmp2.set(pos.x, pos.y + 0.55, pos.z).project(state.camera)
+      lab.x = (st.tmp2.x * 0.5 + 0.5) * window.innerWidth
+      lab.y = (-st.tmp2.y * 0.5 + 0.5) * window.innerHeight
+      lab.o = st.tmp2.z < 1 ? lo : 0
     })
     // laptop screen dies as the water takes it; the tools slide off the plank
     {
@@ -319,6 +330,10 @@ export function Storm() {
     swimmer.j.hpR.rotation.z = -0.05 - 0.04 * Math.sin(phi)
     swimmer.j.knL.rotation.x = sm('kl', 0.18 + 0.5 * Math.max(0, Math.sin(phi * 2 - 0.9)) * exhaust, 14)
     swimmer.j.knR.rotation.x = sm('kr', 0.18 + 0.5 * Math.max(0, Math.sin(phi * 2 + Math.PI - 0.9)) * exhaust, 14)
+    // resistance: the body pitches nose-down into each pull and recovers on the glide; arms never swing through the torso
+    body.rotation.x += 0.06 * Math.sin(phi + 0.6) * exhaust
+    limitPose(swimmer)
+    clearArms(swimmer)
     body.updateWorldMatrix(true, true)
     if (reachW > 0.001) solveArm(swimmer, 'L', st.target, reachW, v(0.8, 0.7, -0.4))
     if (ring > 0.001) solveArm(swimmer, 'R', st.grip2, smooth(0.75, 0.8, p), v(-0.8, 0.7, -0.3))

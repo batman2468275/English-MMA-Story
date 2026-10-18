@@ -10,7 +10,7 @@ import {
   Quaternion,
   Vector3,
 } from 'three'
-import { easeOut, mulberry32, clamp01 } from '../core/math'
+import { easeInOut, mulberry32, clamp01 } from '../core/math'
 import { fenceTexture } from './textures'
 import { palette } from '../theme'
 
@@ -73,14 +73,24 @@ export function Cage({
       const a = ((k % 8) + 0.5) * (Math.PI / 4)
       return new Vector3(Math.cos(a) * radius, y, Math.sin(a) * radius)
     }
-    type Bar = { a: Vector3; b: Vector3; mid: Vector3; quat: Quaternion; len: number; start: Vector3; startQ: Quaternion; delay: number }
+    type Bar = {
+      a: Vector3; b: Vector3; mid: Vector3; quat: Quaternion; len: number; start: Vector3; startQ: Quaternion; delay: number
+      away: Vector3; dir: Vector3; arc: number
+    }
     const list: Bar[] = []
     const push = (a: Vector3, b: Vector3) => {
       const dir = b.clone().sub(a)
       const len = dir.length()
       const quat = new Quaternion().setFromUnitVectors(X, dir.clone().normalize())
       const start = new Vector3(rnd() - 0.5, rnd() - 0.2, rnd() - 0.5).normalize().multiplyScalar(scatter * (0.5 + rnd()))
-      list.push({ a, b, mid: a.clone().add(b).multiplyScalar(0.5), quat, len, start, startQ: new Quaternion(), delay: rnd() * 0.55 })
+      const mid = a.clone().add(b).multiplyScalar(0.5)
+      const travel = mid.clone().sub(start)
+      list.push({
+        a, b, mid, quat, len, start, startQ: new Quaternion(), delay: rnd() * 0.55,
+        away: travel.clone().normalize().multiplyScalar(-1),
+        dir: travel.clone().normalize(),
+        arc: Math.min(2.4, travel.length() * 0.14),
+      })
     }
     for (let k = 0; k < 8; k++) {
       push(V(k, 0), V(k + 1, 0)) // bottom ring
@@ -125,13 +135,29 @@ export function Cage({
       const m = meshes.current[i]
       if (!m) continue
       const b = bars[i]
-      const e = easeOut(clamp01((A - b.delay) / 0.45))
+      // Each bar's journey is three beats: a small wind-up away from its slot (anticipation), a heavy arcing flight that
+      // accelerates then brakes (ease in-out), and a damped overshoot with a rattle + thickness "clank" as it locks in.
+      const t = clamp01((A - b.delay) / 0.42)
+      const u = easeInOut(clamp01((t - 0.1) / 0.72))
       tmpV.copy(b.start)
-      tmpV.y += Math.sin(time * 0.8 + i) * 0.3 * (1 - e)
-      m.position.lerpVectors(tmpV, b.mid, e)
-      tmpQ.copy(b.startQ).slerp(b.quat, e)
+      tmpV.y += Math.sin(time * 0.8 + i) * 0.3 * (1 - clamp01(t * 3)) // free-floating drift before it's called in
+      m.position.lerpVectors(tmpV, b.mid, u)
+      // wind-up: the bar first backs away a touch from where it is going
+      const back = Math.sin(Math.PI * clamp01(t / 0.1)) * 0.35 * (1 - u)
+      m.position.addScaledVector(b.away, back)
+      // arc: heavy things fall into place — they rise slightly mid-flight and drop in
+      m.position.y += Math.sin(Math.PI * u) * b.arc * (1 - u * 0.2)
+      tmpQ.copy(b.startQ).slerp(b.quat, u)
       m.quaternion.copy(tmpQ)
-      m.visible = e > 0.001
+      let pulse = 1
+      if (t > 0.82) {
+        const s = (t - 0.82) / 0.18
+        const ring = Math.exp(-5 * s) * Math.sin(16 * s)
+        m.position.addScaledVector(b.dir, 0.16 * ring) // overshoot along its travel direction, then settle
+        pulse = 1 + 0.9 * Math.exp(-6 * s)
+      }
+      m.scale.set(1, pulse, pulse)
+      m.visible = t > 0.001
     }
     for (const p of panels.current) if (p) p.visible = A > 0.55
   })

@@ -91,21 +91,37 @@ export function setCam(
   }
 }
 
-/** Piecewise-smooth keyframe interpolation of a vector over progress p. */
+/**
+ * Keyframe interpolation of a vector over progress p using a non-uniform Catmull-Rom spline (cubic Hermite):
+ * velocity is continuous through every key, so camera moves flow like a real operator's move instead of stopping and
+ * restarting at each key. The very first and last segments ease in / ease out (zero tangent) for a natural start and settle.
+ */
 export function keys(p: number, frames: { p: number; v: V3 }[]): V3 {
+  const n = frames.length
   if (p <= frames[0].p) return frames[0].v
-  const last = frames[frames.length - 1]
+  const last = frames[n - 1]
   if (p >= last.p) return last.v
-  for (let i = 0; i < frames.length - 1; i++) {
-    const a = frames[i]
-    const b = frames[i + 1]
-    if (p >= a.p && p <= b.p) {
-      let t = (p - a.p) / (b.p - a.p)
-      t = t * t * (3 - 2 * t)
-      return [a.v[0] + (b.v[0] - a.v[0]) * t, a.v[1] + (b.v[1] - a.v[1]) * t, a.v[2] + (b.v[2] - a.v[2]) * t]
-    }
+  let i = 0
+  while (i < n - 2 && p > frames[i + 1].p) i++
+  const f0 = frames[Math.max(i - 1, 0)]
+  const f1 = frames[i]
+  const f2 = frames[i + 1]
+  const f3 = frames[Math.min(i + 2, n - 1)]
+  const h = f2.p - f1.p
+  const t = (p - f1.p) / h
+  const t2 = t * t
+  const t3 = t2 * t
+  const h00 = 2 * t3 - 3 * t2 + 1
+  const h10 = t3 - 2 * t2 + t
+  const h01 = -2 * t3 + 3 * t2
+  const h11 = t3 - t2
+  const out: V3 = [0, 0, 0]
+  for (let c = 0; c < 3; c++) {
+    const m1 = i === 0 ? 0 : ((f2.v[c] - f0.v[c]) / (f2.p - f0.p)) * h
+    const m2 = i === n - 2 ? 0 : ((f3.v[c] - f1.v[c]) / (f3.p - f1.p)) * h
+    out[c] = h00 * f1.v[c] + h10 * m1 + h01 * f2.v[c] + h11 * m2
   }
-  return last.v
+  return out
 }
 
 export function keys1(p: number, frames: { p: number; v: number }[]): number {

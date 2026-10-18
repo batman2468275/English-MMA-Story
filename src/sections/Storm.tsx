@@ -17,10 +17,19 @@ export function StormSection() {
   const key = useRef<HTMLDivElement>(null)
   const words = useRef<(HTMLSpanElement | null)[]>([])
   const beat = useRef<HTMLDivElement>(null)
+  const labels = useRef<(HTMLDivElement | null)[]>([])
 
   useTicker(() => {
     const p = store.local[I]
     if (store.reduced) return
+    // the four "things I tried before" are tagged as they drift into reach (positions are projected from the 3D scene)
+    store.stormLabels.forEach((L, i) => {
+      const el = labels.current[i]
+      if (!el) return
+      const o = store.active === I ? L.o : 0
+      el.style.opacity = o < 0.01 ? '0' : String(o)
+      el.style.transform = `translate3d(${L.x}px, ${L.y}px, 0) scale(${0.92 + 0.08 * o})`
+    })
     stormFragments.forEach((f, i) => {
       const el = frags.current[i]
       if (!el) return
@@ -70,6 +79,12 @@ export function StormSection() {
         <p key={i} ref={(el) => (frags.current[i] = el)} className="frag" style={{ left: `${f.x}%`, top: `${f.y}%`, opacity: 0 }}>
           {f.t}
         </p>
+      ))}
+
+      {['Basketball', 'Coding', 'Art', 'Woodworking'].map((t, i) => (
+        <div key={t} ref={(el) => (labels.current[i] = el)} className="storm-label" aria-hidden="true">
+          <span>{t}</span>
+        </div>
       ))}
 
       <div ref={key} className="keyline" style={{ opacity: 0 }}>

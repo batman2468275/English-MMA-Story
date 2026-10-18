@@ -10,16 +10,47 @@ import { labelSprite } from '../textures'
 import { palette } from '../../theme'
 
 /**
- * 13 — THEN → NOW: a glowing path winds through space. The camera follows it as you scroll; each milestone node lights up
- * when the camera reaches it (the matching DOM card is in sections/Timeline.tsx).
+ * 13 — THEN → NOW: a glowing path winds through space and the camera glides along it on a spline. The travel speed eases down
+ * as it nears each milestone (a little dwell, like a camera operator settling on a subject) and picks up again after. Each node
+ * "pops" the moment it is reached: it springs up with overshoot, a ripple ring expands from it, its beam climbs and its label
+ * brightens (the matching DOM card is in sections/Timeline.tsx).
  */
 const SEG = 400
 const RAD = 6
-const u = (p: number) => 0.02 + 0.94 * p
+const LO = 0.02
+const HI = 0.96
+
+/** progress → distance along the path, slowing near each node so the camera lingers there. Monotonic, with a lookup table. */
+const TABLE = (() => {
+  const N = 512
+  const cum = new Float32Array(N + 1)
+  let acc = 0
+  for (let i = 0; i <= N; i++) {
+    const p = i / N
+    let dwell = 0
+    for (const m of milestoneP) dwell += Math.exp(-Math.pow((p - m) / 0.04, 2))
+    acc += 1 / (1 + 1.8 * dwell)
+    cum[i] = acc
+  }
+  for (let i = 0; i <= N; i++) cum[i] /= acc
+  return cum
+})()
+const pathU = (p: number) => {
+  const x = clamp01(p) * 512
+  const i = Math.floor(x)
+  const f = x - i
+  const a = TABLE[i]
+  const b = TABLE[Math.min(512, i + 1)]
+  return LO + (HI - LO) * (a + (b - a) * f)
+}
+
+/** damped spring step response (overshoot then settle) */
+const spring = (u: number) => (u <= 0 ? 0 : 1 - Math.exp(-6.5 * u) * Math.cos(15 * u))
 
 export function Timeline() {
   const accent = palette()
   const nodes = useRef<(Group | null)[]>([])
+  const ripples = useRef<(Mesh | null)[]>([])
   const lit = useRef<Mesh>(null)
   const litGlow = useRef<Mesh>(null)
   const head = useRef<Group>(null)
@@ -44,12 +75,13 @@ export function Timeline() {
   const nodeData = useMemo(
     () =>
       milestones.map((m, i) => {
-        const pos = curve.getPointAt(u(milestoneP[i]))
+        const pos = curve.getPointAt(pathU(milestoneP[i]))
         const core = new MeshBasicMaterial({ color: dim.clone(), toneMapped: false })
         const ring = new MeshBasicMaterial({ color: dim.clone(), toneMapped: false })
         const beam = new MeshBasicMaterial({ color: accent.glow, transparent: true, opacity: 0, blending: AdditiveBlending, depthWrite: false, toneMapped: false })
+        const rip = new MeshBasicMaterial({ color: accent.glow.clone().multiplyScalar(2), transparent: true, opacity: 0, blending: AdditiveBlending, depthWrite: false, toneMapped: false })
         const label = labelSprite(m.when.toUpperCase(), { size: 56, color: '#ffffff', glow: '#ff4757', opacity: 0.3, scale: 0.55 })
-        return { pos, core, ring, beam, label }
+        return { pos, core, ring, beam, rip, label }
       }),
     [curve, dim, accent],
   )
@@ -61,32 +93,46 @@ export function Timeline() {
 
   useSceneFrame(12, (p, dt, state) => {
     const t = state.clock.elapsedTime
-    const uc = u(p)
-    // lit portion of the path
+    const uc = pathU(p)
+    // lit portion of the path grows with the camera
     const total = SEG * RAD * 6
-    const count = Math.floor(clamp01(uc) * SEG) * RAD * 6
-    lit.current?.geometry.setDrawRange(0, Math.min(total, count))
-    litGlow.current?.geometry.setDrawRange(0, Math.min(total, count))
-    // nodes
+    const cnt = Math.floor(clamp01(uc) * SEG) * RAD * 6
+    lit.current?.geometry.setDrawRange(0, Math.min(total, cnt))
+    litGlow.current?.geometry.setDrawRange(0, Math.min(total, cnt))
+    // nodes: a spring "pop" on arrival, an expanding ripple, a rising beam
     nodeData.forEach((n, i) => {
-      const l = smooth(milestoneP[i] - 0.045, milestoneP[i] + 0.005, p)
+      const arrive = milestoneP[i] - 0.035
+      const u = (p - arrive) / 0.09
+      const l = smooth(arrive - 0.01, arrive + 0.02, p)
+      const pop = spring(u) * (p >= arrive ? 1 : 0)
       tmpC.copy(dim).lerp(hot, l)
       n.core.color.copy(tmpC)
       n.ring.color.copy(tmpC)
-      n.beam.opacity = l * 0.55
+      n.beam.opacity = l * 0.5 * (0.85 + 0.15 * Math.sin(t * 2 + i))
       n.label.material.opacity = 0.28 + l * 0.72
       const g = nodes.current[i]
       if (g) {
-        g.scale.setScalar(1 + l * 0.35 + Math.sin(t * 2 + i) * 0.03 * l)
+        g.scale.setScalar(1 + 0.55 * pop * l)
         g.rotation.y = t * 0.3
+        g.position.y = 0.12 * Math.sin(t * 1.3 + i) * l
+      }
+      const r = ripples.current[i]
+      if (r) {
+        const k = clamp01((p - arrive) / 0.12)
+        r.visible = p >= arrive && k < 1
+        r.scale.setScalar(lerp(0.7, 4.2, 1 - Math.pow(1 - k, 3)))
+        n.rip.opacity = (1 - k) * 0.7
       }
     })
+    // camera on the path: lookahead + behind, banking into curves, easing as the speed drops near nodes
     const c = curve.getPointAt(clamp01(uc - 0.05))
     const f = curve.getPointAt(clamp01(uc + 0.045))
+    const f2 = curve.getPointAt(clamp01(uc + 0.1))
     camPos.set(c.x + 0.6, c.y + 2.6, c.z + 8.4)
     look.set(f.x, f.y - 0.3, f.z)
+    const bank = clamp01(Math.abs(f2.z - f.z) * 0.3) * Math.sign(f2.z - f.z) * 0.05
     if (head.current) head.current.position.copy(curve.getPointAt(clamp01(uc)))
-    setCam(12, state.camera as never, [camPos.x, camPos.y, camPos.z], [look.x, look.y, look.z], 56, dt, { lambda: 5, parallax: 0.2 })
+    setCam(12, state.camera as never, [camPos.x, camPos.y, camPos.z], [look.x, look.y, look.z], 56, dt, { lambda: 3.8, parallax: 0.2, roll: bank })
   })
 
   return (
@@ -116,6 +162,9 @@ export function Timeline() {
               <torusGeometry args={[0.62, 0.02, 8, 8]} />
             </mesh>
           </group>
+          <mesh ref={(r) => (ripples.current[i] = r)} material={n.rip} rotation={[-Math.PI / 2, 0, 0]} visible={false}>
+            <ringGeometry args={[0.9, 1, 48]} />
+          </mesh>
           <mesh position={[0, 3.2, 0]} material={n.beam}>
             <cylinderGeometry args={[0.05, 0.28, 6.4, 12, 1, true]} />
           </mesh>

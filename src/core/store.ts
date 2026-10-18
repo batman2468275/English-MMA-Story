@@ -53,6 +53,9 @@ export const store = {
   },
 
   audioOn: false,
+
+  /** screen-space anchors (px) + opacity of the four storm object labels, written by the Storm scene, read by sections/Storm.tsx */
+  stormLabels: [0, 1, 2, 3].map(() => ({ x: 0, y: 0, o: 0 })),
 }
 
 export type Store = typeof store

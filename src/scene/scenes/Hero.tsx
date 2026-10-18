@@ -48,6 +48,11 @@ export function Hero() {
     setCam(0, state.camera as never, pos, look, 50 + e * 8, dt, { lambda: 6, parallax: 0.3 })
 
     if (text.current) {
+      // the title "lands" with a little weighted bounce once the last cage bar locks in
+      const s = clamp01((assemble() - 0.86) / 0.14)
+      const c1 = 1.70158
+      const back = 1 + (c1 + 1) * Math.pow(s - 1, 3) + c1 * Math.pow(s - 1, 2)
+      text.current.scale.setScalar(0.9 + 0.1 * back)
       text.current.rotation.y = damp(text.current.rotation.y, store.mouse.x * 0.35, 3, dt)
       text.current.rotation.x = damp(text.current.rotation.x, store.mouse.y * 0.18, 3, dt)
       text.current.position.y = 2.4 + Math.sin(state.clock.elapsedTime * 0.8) * 0.06

@@ -69,7 +69,7 @@ export function updateFx(now: number) {
 
   // ---- foot: crack draws, then heals with light
   const pf = store.local[FOOT]
-  f.crack = smooth(0.12, 0.42, pf)
+  f.crack = smooth(0.15, 0.4, pf) // the screen crack races out right after the bone snaps (p ≈ .15)
   f.heal = smooth(0.52, 0.82, pf)
 
   // ---- flow: time dilation
