@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Vector3 } from 'three'
-import { createFigure, Figure, groundFigure, limitPose, lookAt, resetPose, solveArm } from '../figure'
+import { createFigure, Figure, groundFigure, limitPose, lookAt, resetPose, setHand, solveArm } from '../figure'
 import { resolveContacts } from '../contact'
 import { rimMaterial, setRimLight } from '../materials'
 import { Glow } from '../shapes'
@@ -103,6 +103,7 @@ function poseFlow(a: Figure, b: Figure, t: number, contacts: boolean) {
       POLE.x += out * s * 0.8 * (toMe.z)
       POLE.z += -out * s * 0.8 * (toMe.x)
       solveArm(me, hand, SUM.clone(), 0.95, POLE)
+      setHand(me, hand, 0.8) // fingers wrapped round whatever they hold (collar, elbow, head)
     }
   }
 }

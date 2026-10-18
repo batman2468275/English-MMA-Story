@@ -15,7 +15,7 @@ import {
   SRGBColorSpace,
   Vector3,
 } from 'three'
-import { createFigure, Figure, groundFigure, limitPose, lookAt, resetPose, solveArm, solveLeg, plantJoint } from '../figure'
+import { createFigure, Figure, groundFigure, limitPose, lookAt, resetPose, solveArm, solveLeg, plantJoint, palmFacing, setHand } from '../figure'
 import { resolveContacts } from '../contact'
 import { rimMaterial, setRimLight } from '../materials'
 import { Emit, Glow, Box } from '../shapes'
@@ -69,6 +69,7 @@ function boxerStance(f: Figure, t: number, ph: number, amp = 1) {
 /** Send a hand toward a world target by extension e (e < 0 = loaded back); the start is the hand's current guard position. */
 function throwHand(f: Figure, side: 'L' | 'R', target: Vector3, e: number, weight = 1) {
   const tip = side === 'L' ? f.tipL : f.tipR
+  setHand(f, side, 0.9) // fist
   tip.getWorldPosition(g0)
   g1.copy(g0).lerp(target, e)
   rightOf(f, rt)
@@ -167,13 +168,21 @@ export function Gym() {
     return l
   }, [ropeGeom, ropeMat])
 
-  // focus mitts strapped to the pad holder's hands
+  // focus mitts strapped to the pad holder's hands: the pad sits on the palm side of each hand (a child of the hand itself, so it
+  // can never drift off), and every frame the forearm rolls so the pad's face presents itself to the striker
   useEffect(() => {
-    for (const tip of [F.padH.tipL, F.padH.tipR]) {
-      const m = new Mesh(new BoxGeometry(0.3, 0.1, 0.4), new MeshStandardMaterial({ color: '#b0262d', roughness: 0.6, emissive: '#3a0508' }))
-      m.position.y = 0.02
-      tip.add(m)
+    const made: Mesh[] = []
+    for (const side of ['L', 'R'] as const) {
+      const hand = F.padH.hands[side]
+      const m = new Mesh(new BoxGeometry(0.07, 0.27, 0.21), new MeshStandardMaterial({ color: '#b0262d', roughness: 0.6, emissive: '#3a0508' }))
+      m.position.set(hand.ins * 0.06, -0.06, 0)
+      hand.grp.add(m)
+      const strap = new Mesh(new BoxGeometry(0.075, 0.03, 0.23), new MeshStandardMaterial({ color: '#1a1a1d', roughness: 0.8 }))
+      strap.position.set(hand.ins * 0.06, -0.15, 0)
+      hand.grp.add(strap)
+      made.push(m, strap)
     }
+    return () => made.forEach((m) => m.parent?.remove(m))
   }, [F])
 
   const bagX = useMemo(() => [-1, 1, -1, 1], [])
@@ -224,7 +233,9 @@ export function Gym() {
       boxerStance(k, t, 0);
       const kick = punchCurve(uKick)
       const kickLift = Math.max(0, kick)
-      k.root.position.set(-0.78 + 0.05 * Math.sin(t * 2), 0.98, -10.5)
+      k.root.position.set(-0.78 + 0.05 * Math.sin(t * 2) + 0.07 * Math.max(0, punchCurve(uJab)) + 0.05 * Math.max(0, punchCurve(uCross)), 0.98, -10.5)
+      // hips lead the punches: they rotate into the cross and load back on the jab (weight shifts with the stance)
+      k.root.rotation.y += 0.14 * Math.max(0, punchCurve(uCross)) - 0.08 * Math.max(0, punchCurve(uJab))
       h.root.position.set(0.7 + 0.07 * Math.max(0, kick) + 0.05 * Math.max(0, punchCurve(uJab)) , 0.98, -10.5)
       h.j.spine.rotation.x = 0.1 + 0.18 * Math.max(0, kick)
       h.j.hpL.rotation.x = -0.25; h.j.hpR.rotation.x = 0.2; h.j.knL.rotation.x = 0.25; h.j.hpL.rotation.z = 0.1; h.j.hpR.rotation.z = -0.1
@@ -248,6 +259,11 @@ export function Gym() {
       const mittR = new Vector3(h.root.position.x - 0.34 + rec(uJab), 1.42, -10.5 - 0.2)
       solveArm(h, 'L', mittL, 1, pole.set(0.2, 0.2, 1))
       solveArm(h, 'R', mittR, 1, pole.set(0.2, 0.2, -1))
+      fwdOf(h, fw)
+      palmFacing(h, 'L', fw, 1)
+      palmFacing(h, 'R', fw, 1)
+      setHand(h, 'L', 0.15)
+      setHand(h, 'R', 0.15)
       // kicker's hands: lead jab to the right mitt, rear cross to the left mitt
       throwHand(k, 'L', mittR, punchCurve(uJab))
       throwHand(k, 'R', mittL, punchCurve(uCross))

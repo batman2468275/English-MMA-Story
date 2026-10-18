@@ -1,6 +1,6 @@
 import { useMemo, useRef } from 'react'
 import { AdditiveBlending, Group, Mesh, ShaderMaterial, Vector3 } from 'three'
-import { createFigure, Figure, limitPose, liftAboveFloor, resetPose, solveArm, solveLeg } from '../figure'
+import { createFigure, Figure, limitPose, liftAboveFloor, resetPose, setHand, solveArm, solveLeg } from '../figure'
 import { resolveContacts } from '../contact'
 import { rimMaterial } from '../materials'
 import { GradientSky } from '../GradientSky'
@@ -88,12 +88,15 @@ export function Sunset() {
     // B: stands, is dragged back and down into a seated position leaning on A, then slumps when released
     B.root.rotation.y = Math.PI / 2
     B.root.position.set(lerp(0.0, 0.06, sit) + 0.012 * Math.sin(t * 5) * struggle, 0.98, 0)
-    B.j.hpL.rotation.x = lerp(0.0, -1.45, sit)
-    B.j.hpR.rotation.x = lerp(0.0, -1.45, sit)
-    B.j.knL.rotation.x = lerp(0.06, 0.12, sit)
-    B.j.knR.rotation.x = lerp(0.06, 0.12, sit)
-    B.j.hpL.rotation.z = lerp(0.06, 0.16, sit)
-    B.j.hpR.rotation.z = lerp(-0.06, -0.16, sit)
+    // seated with the knees drawn up and apart (never two straight rods): they kick and push while he fights, then fall slack
+    const kick = Math.max(0, Math.sin(t * 8.5)) * struggle
+    const kick2 = Math.max(0, Math.sin(t * 8.5 + 2.4)) * struggle
+    B.j.hpL.rotation.x = lerp(0.0, -2.0, sit) + 0.18 * kick
+    B.j.hpR.rotation.x = lerp(0.0, -1.95, sit) + 0.18 * kick2
+    B.j.knL.rotation.x = lerp(0.06, 2.45, sit) - 0.55 * kick + 0.35 * limp
+    B.j.knR.rotation.x = lerp(0.06, 2.35, sit) - 0.55 * kick2 + 0.3 * limp
+    B.j.hpL.rotation.z = lerp(0.06, 0.28, sit) + 0.22 * limp
+    B.j.hpR.rotation.z = lerp(-0.06, -0.28, sit) - 0.22 * limp
     B.j.spine.rotation.x = lerp(0.03, -0.3, sit) + 0.14 * limp // leans back onto A, then slumps forward
     B.j.spine.rotation.y = Math.sin(t * 6) * 0.16 * struggle // twisting against the hold
     B.j.head.rotation.x = lerp(0, 0.28, sq) * hold + 0.35 * limp // chin tucked against the choke, then head drops
@@ -104,10 +107,6 @@ export function Sunset() {
     B.j.shR.rotation.x = -0.9 * flail
     B.j.shL.rotation.z = 0.15 + 0.3 * flail
     B.j.shR.rotation.z = -0.15 - 0.3 * flail
-    // heels drum the mat as he fights
-    B.j.knL.rotation.x += Math.max(0, Math.sin(t * 9)) * 0.35 * struggle
-    B.j.knR.rotation.x += Math.max(0, Math.sin(t * 9 + 2.2)) * 0.35 * struggle
-    B.j.hpL.rotation.x += Math.sin(t * 9) * 0.06 * struggle
     // limp: the whole body rolls toward his left onto the mat
     B.root.rotation.z = -0.55 * limp * release
 
@@ -121,8 +120,9 @@ export function Sunset() {
     A.j.hpR.rotation.x = lerp(-stride, -1.15, sit)
     A.j.knL.rotation.x = lerp(0.2 + Math.max(0, -stride) * 0.6, 1.2, sit)
     A.j.knR.rotation.x = lerp(0.2 + Math.max(0, stride) * 0.6, 1.2, sit)
-    A.j.hpL.rotation.z = lerp(0.06, 0.5, sit)
-    A.j.hpR.rotation.z = lerp(-0.06, -0.5, sit)
+    A.j.hpL.rotation.z = lerp(0.06, 0.55, sit)
+    A.j.hpR.rotation.z = lerp(-0.06, -0.55, sit)
+    A.j.head.rotation.z = -0.22 * smooth(0.3, 0.42, p) * hold // his head tucks in beside B's
     A.j.spine.rotation.x = lerp(0.1, -0.4, sit) + 0.1 * sq * hold - 0.2 * release
     A.j.head.rotation.x = 0.1
 
@@ -172,13 +172,13 @@ export function Sunset() {
         solveArm(A, 'L', target, wrapW, T.pole)
       }
     }
-    // hooks: A's feet clamp round B's hips (outside the thighs, on the mat)
+    // body triangle: A's knees swing out round B's hips and his feet hook over B's thighs at the waist, ankles crossing
     const hooks = smooth(0.24, 0.34, p) * hold
     for (const sd of [1, -1] as const) {
-      const foot = T.a.copy(T.pel).addScaledVector(FWD, 0.32).addScaledVector(RIGHT, -sd * 0.27)
-      foot.y = 0.05
-      T.pole.set(0, 1, -sd * 0.7)
-      solveLeg(A, sd === 1 ? 'L' : 'R', foot, hooks * 0.9, T.pole)
+      const foot = T.a.copy(T.pel).addScaledVector(FWD, 0.2).addScaledVector(RIGHT, sd * 0.035)
+      foot.y = T.pel.y + 0.3 + 0.02 * Math.sin(t * 8.5) * struggle
+      T.pole.set(0.1, 0.25, -sd * 1)
+      solveLeg(A, sd === 1 ? 'L' : 'R', foot, hooks, T.pole)
     }
 
     // ---------------------------------------------------------------------------------- B's hands: fight the choke, then tap
@@ -202,6 +202,11 @@ export function Sunset() {
       B.j.shL.rotation.z = lerp(B.j.shL.rotation.z, 0.5, limp)
       B.j.shR.rotation.z = lerp(B.j.shR.rotation.z, -0.5, limp)
     }
+    // grips: A's choking hand and the hand behind the head close; B claws at the forearm, then goes slack
+    setHand(A, 'R', 0.75 * wrapW)
+    setHand(A, 'L', 0.7 * wrapW)
+    setHand(B, 'R', 0.85 * struggle + 0.2)
+    setHand(B, 'L', 0.85 * struggle + 0.2)
     liftAboveFloor(B, 0, true)
 
     if (grp.current) grp.current.rotation.y = 0
@@ -211,8 +216,9 @@ export function Sunset() {
     A.root.getWorldPosition(T.a)
     const cx = (T.a.x + T.pel.x) / 2
     const ang = keys(p, [{ p: 0, v: [-1.05, 0, 0] }, { p: 0.35, v: [-0.35, 0, 0] }, { p: 0.7, v: [0.55, 0, 0] }, { p: 1, v: [1.25, 0, 0] }])[0]
-    const R = keys(p, [{ p: 0, v: [5.6, 0, 0] }, { p: 0.4, v: [4.1, 0, 0] }, { p: 1, v: [4.6, 0, 0] }])[0]
-    setCam(6, state.camera as never, [cx + Math.sin(ang) * R, lerp(1.2, 1.1, smooth(0.2, 0.5, p)), Math.cos(ang) * R], [cx, 0.55, 0], 44, dt, { lambda: 4, parallax: 0.1 })
+    const R = keys(p, [{ p: 0, v: [5.4, 0, 0] }, { p: 0.3, v: [3.7, 0, 0] }, { p: 0.55, v: [2.9, 0, 0] }, { p: 0.85, v: [3.2, 0, 0] }, { p: 1, v: [3.9, 0, 0] }])[0]
+    const ly = lerp(0.55, 0.78, smooth(0.25, 0.5, p))
+    setCam(6, state.camera as never, [cx + Math.sin(ang) * R, lerp(1.2, 1.15, smooth(0.2, 0.5, p)), Math.cos(ang) * R], [cx, ly, 0], 42, dt, { lambda: 4, parallax: 0.1 })
   })
 
   return (

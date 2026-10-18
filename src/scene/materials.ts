@@ -38,7 +38,13 @@ export function rimMaterial(base: string, rim: string, power = 2.4, intensity = 
         vec3 L = uLightPos - vWP; float d = length(L); L /= max(d, 0.001);
         float lam = max(dot(normalize(vNW), L), 0.0);
         vec3 lit = uLightCol * (lam * uLightI / (1.0 + 0.06 * d * d));
-        gl_FragColor = vec4(mix(uBase, uRim * uInt, f) + lit, uAlpha);
+        // soft top-light + view fill so overlapping limbs (an arm across a chest) separate by shading instead of merging into
+        // one dark slab, while the glowing rim still carries the look
+        vec3 nw = normalize(vNW);
+        float top = 0.5 + 0.5 * nw.y;
+        float face = max(dot(normalize(vN), normalize(vV)), 0.0);
+        vec3 fill = uRim * (0.035 + 0.075 * top * top + 0.03 * face);
+        gl_FragColor = vec4(mix(uBase, uRim * uInt, f) + fill + lit, uAlpha);
       }`,
   })
 }

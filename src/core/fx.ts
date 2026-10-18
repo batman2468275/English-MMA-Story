@@ -17,9 +17,26 @@ const FLOW = indexOf('flow')
 
 export const VAN_HIT = 0.4
 export const STORM_GRAB = 0.74
+// Van ground-and-pound cadence (shared with scene/scenes/Van.tsx): strikes start at GP_START of the chapter, span GP_SPAN of it,
+// and each lands at GP_CONTACT of its own beat
+export const GP_START = 0.52
+export const GP_SPAN = 0.43
+export const GP_STRIKES = 11
+export const GP_CONTACT = 0.62
 
-type Listener = (name: 'van-hit' | 'storm-grab') => void
+export type HitName = 'van-hit' | 'storm-grab' | 'ground-hit' | 'choke-tight' | 'choke-release' | 'foot-crack' | 'foot-heal'
+type Listener = (name: HitName) => void
 const listeners: Listener[] = []
+const SUNSET = indexOf('sunset')
+// one-shot score stingers (audio/engine.ts) fire when forward scroll crosses these beats
+const CROSSINGS: { name: HitName; idx: number; at: number; prev: number }[] = [
+  { name: 'choke-tight', idx: SUNSET, at: 0.4, prev: 0 }, // the squeeze begins
+  { name: 'choke-release', idx: SUNSET, at: 0.8, prev: 0 }, // he lets go
+  { name: 'foot-crack', idx: FOOT, at: 0.15, prev: 0 }, // the bone snaps
+  { name: 'foot-heal', idx: FOOT, at: 0.52, prev: 0 }, // the healing light
+]
+let prevGround = 0
+let tGround = -99
 export const onHit = (fn: Listener) => {
   listeners.push(fn)
   return () => listeners.splice(listeners.indexOf(fn), 1)
@@ -53,8 +70,26 @@ export function updateFx(now: number) {
   // ---- Van knock-down impact
   const hitEnv = active === VAN ? Math.exp(-dv / 0.22) : 0
   const strikeBand = active === VAN ? smooth(VAN_HIT, VAN_HIT + 0.05, pv) * (1 - smooth(0.7, 0.8, pv)) : 0
-  f.flash = hitEnv * 0.95
-  f.shake = hitEnv * 0.45 + strikeBand * 0.025 * (0.6 + 0.4 * Math.sin(now * 40))
+  // every ground strike fires a small flash + shake + thud on its contact frame (crossing-triggered, decays in real time)
+  let gHit = 0
+  if (active === VAN) {
+    const gp = (pv - GP_START) / GP_SPAN
+    const contacts = gp > 0 && gp < 1 ? Math.floor(gp * GP_STRIKES + (1 - GP_CONTACT)) : 0
+    if (contacts === prevGround + 1) {
+      tGround = now
+      listeners.forEach((l) => l('ground-hit'))
+    }
+    prevGround = contacts
+    const limpK = 1 - 0.6 * smooth(0.62, 0.95, Math.max(0, Math.min(1, gp)))
+    gHit = Math.exp(-(now - tGround) / 0.09) * limpK
+  }
+  for (const c of CROSSINGS) {
+    const p = store.local[c.idx]
+    if (active === c.idx && c.prev < c.at && p >= c.at && p - c.prev < 0.1) listeners.forEach((l) => l(c.name))
+    c.prev = p
+  }
+  f.flash = hitEnv * 0.95 + gHit * 0.1
+  f.shake = hitEnv * 0.45 + gHit * 0.09 + strikeBand * 0.025 * (0.6 + 0.4 * Math.sin(now * 40))
   f.aberration = hitEnv * 0.016 + (dv < 0.5 && active === VAN ? (Math.random() - 0.5) * 0.004 : 0)
   f.shockR = active === VAN && dv < 1.6 ? dv * 0.75 : -1
   f.shockAmp = active === VAN && dv < 1.6 ? Math.exp(-dv * 1.7) : 0

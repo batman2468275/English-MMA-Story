@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Vector3 } from 'three'
-import { createFigure, Figure, limitPose, liftAboveFloor, lookAt, resetPose, solveArm } from '../figure'
+import { createFigure, Figure, limitPose, liftAboveFloor, lookAt, resetPose, setHand, solveArm } from '../figure'
 import { resolveContacts } from '../contact'
 import { glowMaterial, rimMaterial } from '../materials'
 import { Cage } from '../Cage'
@@ -10,7 +10,7 @@ import { useSceneFrame, count } from '../hooks'
 import { setCam, keys } from '../camera'
 import { clamp01, easeInOut, lerp, smooth } from '../../core/math'
 import { store } from '../../core/store'
-import { VAN_HIT } from '../../core/fx'
+import { VAN_HIT, GP_CONTACT } from '../../core/fx'
 
 /**
  * 04 — JOSHUA VAN. A real exchange, built from weighted phases (all pure functions of scroll progress, so it scrubs both ways):
@@ -110,6 +110,17 @@ export function Van() {
     const kneel = smooth(0.44, 0.545, p)
     const gp = clamp01((p - 0.52) / 0.43) // ground-and-pound progress
     const limp = smooth(0.62, 0.95, gp)
+    // ground-and-pound cadence: strike k alternates hands; `swing` is the torso/hip rotation (wind-up away → drive through → recover)
+    const gph = gp * N_STRIKES
+    const gIdx = Math.floor(Math.min(gph, N_STRIKES - 1e-6))
+    const gS = gph - gIdx
+    const gAct = gp > 0 && gp < 1 ? smooth(0.0, 0.05, gp) * (1 - smooth(0.93, 1, gp)) : 0
+    const sgn = gIdx % 2 === 0 ? 1 : -1 // +1: right hand strikes
+    const swing =
+      gS < GP_CONTACT * 0.72 ? -0.35 * easeInOut(gS / (GP_CONTACT * 0.72))
+        : gS < GP_CONTACT ? lerp(-0.35, 0.5, easeIn2((gS - GP_CONTACT * 0.72) / (GP_CONTACT * 0.28)))
+          : gS < 0.82 ? lerp(0.5, 0.12, easeInOut((gS - GP_CONTACT) / (0.82 - GP_CONTACT)))
+            : lerp(0.12, 0, easeInOut((gS - 0.82) / 0.18))
     const snapT = (p - VAN_HIT) / 0.02
     const bump = smooth(0, 0.15, snapT) * (1 - smooth(0.4, 1.7, snapT))
 
@@ -140,16 +151,22 @@ export function Van() {
     roy.j.elL.rotation.x = lerp(roy.j.elL.rotation.x, -0.1, dead)
     roy.j.elR.rotation.x = lerp(roy.j.elR.rotation.x, -0.1, dead)
     // each ground strike jolts his head
+    let rzShift = 0
     if (gp > 0 && gp < 1) {
       const ph = gp * N_STRIKES
       const sIn = ph - Math.floor(ph)
-      const jolt = Math.exp(-Math.max(0, sIn - 0.62) * 14) * (sIn > 0.62 ? 1 : 0) * (1 - limp * 0.6)
+      const jolt = Math.exp(-Math.max(0, sIn - GP_CONTACT) * 14) * (sIn > GP_CONTACT ? 1 : 0) * (1 - limp * 0.6)
       roy.j.head.rotation.y += (Math.floor(ph) % 2 ? 1 : -1) * 0.22 * jolt
       roy.j.head.rotation.x += -0.12 * jolt
+      // the body takes the blow too: hips skid, knees pinch in, shoulders roll
+      roy.j.hpL.rotation.z -= 0.08 * jolt * (1 - limp)
+      roy.j.hpR.rotation.z += 0.08 * jolt * (1 - limp)
+      roy.j.spine.rotation.z += (Math.floor(ph) % 2 ? 1 : -1) * 0.06 * jolt
+      rzShift = (Math.floor(ph) % 2 ? 1 : -1) * 0.025 * jolt
     }
     roy.root.rotation.x = -fall * 1.5
     roy.root.position.x = 1.2 + 0.7 * fall * fall + (strikeW > 0 ? 0.08 * pre : 0)
-    roy.root.position.z = 0.02 * Math.sin(t * 5.2)
+    roy.root.position.z = 0.02 * Math.sin(t * 5.2) * (1 - fall) + rzShift
     roy.root.updateWorldMatrix(true, true)
     liftAboveFloor(roy, 0, true)
 
@@ -174,14 +191,16 @@ export function Van() {
     // torso twist for the overhand: loads away, then drives through
     const twist =
       sRaw < 0 ? 0 : sRaw < 0.35 ? -0.45 * easeInOut(sRaw / 0.35) : sRaw < 0.62 ? lerp(-0.45, 0.55, easeIn2((sRaw - 0.35) / 0.27)) : sRaw < 1 ? lerp(0.55, 0.15, easeInOut((sRaw - 0.62) / 0.38)) : 0.15 * (1 - kneel)
-    j.spine.rotation.y = twist * (1 - kneel)
-    j.spine.rotation.x = lerp(j.spine.rotation.x, 1.15, kneel) + 0.08 * lunge * (1 - kneel)
+    j.spine.rotation.y = twist * (1 - kneel) + sgn * swing * kneel * gAct
+    j.spine.rotation.x = lerp(j.spine.rotation.x, 1.15, kneel) + 0.08 * lunge * (1 - kneel) + 0.14 * Math.max(0, swing) * gAct * kneel
+    j.hpL.rotation.z += sgn * 0.05 * swing * gAct * kneel
     j.head.rotation.x = lerp(j.head.rotation.x, 0.4, kneel)
     // placement: stands off at range, steps in, then drops beside Royval's torso on the far (−Z) side
     roy.j.head.getWorldPosition(roy_head)
     const standX = -1.28 + glide + 0.6 * lunge
     van.root.position.x = lerp(standX, roy_head.x - 0.62, kneel)
-    van.root.position.z = lerp(0, -0.58, kneel)
+    van.root.position.z = lerp(0, -0.58, kneel) + sgn * 0.03 * swing * gAct * kneel // hips shift into each strike
+    van.root.rotation.y += sgn * 0.1 * swing * gAct * kneel
     van.root.position.y = 0.98
     van.root.updateWorldMatrix(true, true)
     liftAboveFloor(van, 0, true)
@@ -205,6 +224,11 @@ export function Van() {
     fwd.set(Math.sin(psi), 0, Math.cos(psi))
     right.set(-Math.cos(psi), 0, Math.sin(psi)) // the fighter's right-hand side in world space
 
+    // fists: closed in the stance and on the striking hand, relaxed on the posting hand
+    for (const sd of ['L', 'R'] as const) {
+      setHand(van, sd, 0.9 * (1 - kneel) + 0.3 * kneel)
+      setHand(roy, sd, 0.9 * (1 - fall) + 0.55 * fall * (1 - limp))
+    }
     // Royval covers his face, then his guard drops as he is knocked out of it
     const cover = smooth(0.12, 0.3, u) * (1 - limp) * pre * smooth(0.35, 0.6, fall + 0.4 * u)
     if (cover > 0.02) {
@@ -266,6 +290,7 @@ export function Van() {
           w = Math.max(w, active)
           pole.set(0, 1, -0.8)
           solveArm(van, sd === 1 ? 'L' : 'R', target, w, pole)
+          setHand(van, sd === 1 ? 'L' : 'R', 1)
         } else if (kneel > 0.3) {
           pole.set(0, 0.5, -0.5)
           solveArm(van, sd === 1 ? 'L' : 'R', post, w * 0.8, pole)
@@ -291,8 +316,8 @@ export function Van() {
       { p: 1, v: [0.1, 0.15, 2.6] },
     ])
     const dist = off[2] + Math.max(0, spread - 1.4) * 0.9
-    const pos: [number, number, number] = [midX + off[0], 0.6 + off[1], midZ + dist]
-    const look: [number, number, number] = [midX, lerp(1.15, 0.45, smooth(0.35, 0.6, p)), midZ]
+    const pos: [number, number, number] = [midX + off[0], 0.6 + off[1] + 0.55 * smooth(0.4, 0.6, p), midZ + dist]
+    const look: [number, number, number] = [midX, lerp(1.15, 0.28, smooth(0.35, 0.6, p)), midZ]
     setCam(3, state.camera as never, pos, look, 52 - smooth(0.4, 1, p) * 14, dt, { lambda: 4.5, parallax: 0.12 })
   })
 

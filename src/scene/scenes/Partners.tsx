@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Vector3 } from 'three'
-import { createFigure, Figure, groundFigure, limitPose, lookAt, resetPose, solveArm } from '../figure'
+import { createFigure, Figure, groundFigure, limitPose, lookAt, palmFacing, resetPose, setHand, solveArm } from '../figure'
 import { resolveContacts } from '../contact'
 import { rimMaterial, setRimLight } from '../materials'
 import { Glow } from '../shapes'
@@ -76,6 +76,13 @@ function drillPair(s: Figure, h: Figure, cx: number, cz: number, gap: number, t:
   const hOpen = 1 - bumpW * 0.0
   solveArm(holder, 'L', palmL, hOpen * (1 - bumpW), pole.set(-lat.x, 0.2, -lat.z))
   solveArm(holder, 'R', palmR, hOpen * (1 - bumpW), pole.set(lat.x, 0.2, lat.z))
+  // open palms present their faces to the striker's fists
+  palmFacing(holder, 'L', f1, 1 - bumpW)
+  palmFacing(holder, 'R', f1, 1 - bumpW)
+  setHand(holder, 'L', 0.04)
+  setHand(holder, 'R', 0.04)
+  setHand(striker, 'L', 0.9)
+  setHand(striker, 'R', 0.9)
   // ----- striker's fists stop on the palm surface (never through it)
   striker.root.updateWorldMatrix(true, true)
   const toS = fwd(striker, b).clone()

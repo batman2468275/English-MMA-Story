@@ -1,12 +1,12 @@
 import { useMemo, useRef } from 'react'
 import { InstancedMesh, Object3D, Quaternion, Vector3 } from 'three'
-import { createFigure, limitPose, lookAt, resetPose, solveArm, groundFigure } from '../figure'
+import { createFigure, limitPose, lookAt, resetPose, solveArm, groundFigure, palmFacing, setHand } from '../figure'
 import { glowMaterial, rimMaterial } from '../materials'
 import { Glow } from '../shapes'
 import { ParticleField } from '../particles'
 import { useSceneFrame, count } from '../hooks'
 import { setCam, keys } from '../camera'
-import { lerp, mulberry32, smooth } from '../../core/math'
+import { clamp01, lerp, mulberry32, smooth } from '../../core/math'
 import { store } from '../../core/store'
 
 /**
@@ -24,8 +24,13 @@ const tmpV = new Vector3()
 const tmpQ = new Quaternion()
 const UP = new Vector3(0, 1, 0)
 const dummy = new Object3D()
-const POLE_R = new Vector3(0.9, 0.35, 0)
-const POLE_L = new Vector3(-0.9, 0.2, 0.2)
+const V = () => new Vector3()
+const startL = V(), faceL = V(), faceP = V(), handT = V(), poleL = V(), faceDir = V(), tmpB = V(), tmpC = V()
+const startR = V(), shoulderP = V(), handR = V(), poleR = V(), wristP = V(), startB = V(), handB = V(), poleB = V()
+const easeIn = (x: number) => x * x
+const easeOut = (x: number) => 1 - (1 - x) * (1 - x)
+/** reach with anticipation: a small pull back, then an ease-out to the target (x: 0..1 → -0.05..1) */
+const reachCurve = (x: number) => (x < 0.2 ? -0.05 * Math.sin((Math.PI * x) / 0.2) : easeOut((x - 0.2) / 0.8))
 
 /** warped clock: runs at normal speed, then decelerates exponentially to a halt (speed = flow(p)). */
 const P0 = 0.03
@@ -51,7 +56,8 @@ export function Quiet() {
   const list = useMemo<Drop[]>(() => {
     const r = mulberry32(19)
     const out: Drop[] = []
-    const crowns = [[-1.7, 0.5], [1.5, 0.9], [0.1, -1.0], [-0.6, 1.8]]
+    // splash crowns stay clear of the two figures (no stray stacked beads next to the boy's head)
+    const crowns = [[-2.0, 0.6], [2.2, 1.2], [-1.4, -1.4], [1.9, -1.5]]
     const perCrown = store.mobile ? 12 : 22
     crowns.forEach(([cx, cz], ci) => {
       for (let i = 0; i < perCrown; i++) {
@@ -69,7 +75,9 @@ export function Quiet() {
     })
     const nRain = store.mobile ? 36 : 70
     for (let i = 0; i < nRain; i++) {
-      out.push({ kind: 'rain', x: (r() - 0.5) * 6.5, y: 2 + r() * 4.5, z: (r() - 0.5) * 6 - 0.4, vx: 0.15, vy: -(2.2 + r() * 1.6), vz: 0, t0: 0, r: 0.012 + r() * 0.014 })
+      let rx = (r() - 0.5) * 6.5
+      if (Math.abs(rx - 0.3) < 1.0) rx += rx < 0.3 ? -1.1 : 1.1 // keep the figures' column free of drops
+      out.push({ kind: 'rain', x: rx, y: 2 + r() * 4.5, z: (r() - 0.5) * 6 - 0.4, vx: 0.15, vy: -(2.2 + r() * 1.6), vz: 0, t0: 0, r: 0.012 + r() * 0.014 })
     }
     return out
   }, [])
@@ -122,61 +130,114 @@ export function Quiet() {
       m.instanceMatrix.needsUpdate = true
     }
 
-    // ------------------------------------------------ the boy, caught mid-gasp
+    // ------------------------------------------------ the boy, and his dad's hand over his eyes
+    // Phases (all pure functions of scroll progress): reach (anticipation + ease-out) → cover (contact settles, the boy flinches
+    // into the palm) → hold (a tiny breath) → release (ease-in, the hand lifts away).
     resetPose(boy)
     resetPose(dad)
-    const reach = smooth(0.0, 0.07, p) // dad's hand arrives as time stalls
-    const gasp = smooth(0.0, 0.1, p) // the pose the boy is frozen in
-    const tremor = f * (0.6 + 0.4 * Math.sin(t * 9)) // micro-motion dies with the clock
-    boy.root.position.set(0, 0.95 * 0.92, 0)
-    dad.root.position.set(0.04, 0.95 * 1.08, -0.44)
+    const K = 0.92 // boy scale
+    const reachT = clamp01((p - 0.0) / 0.075) // 0 → 1 over the reach
+    const reachC = reachCurve(reachT)
+    const release = easeIn(smooth(0.93, 1.0, p))
+    const cover = smooth(0.06, 0.1, p) * (1 - release) // contact → pressure
+    const flinch = Math.exp(-Math.max(0, p - 0.072) * 55) * (p > 0.072 ? 1 : 0) // a quick start at contact, settling
+    const gasp = smooth(0.0, 0.1, p)
+    const breath = (0.5 + 0.5 * Math.sin(t * 1.5)) * (0.35 + 0.65 * f) // the freeze keeps a tiny breath
+
+    boy.root.position.set(0, 0.95 * K, 0)
     boy.root.rotation.y = 0
-    dad.root.rotation.y = 0
-    // boy: back arches slightly, chest full, shoulders hunched, hands drawn up toward his chest, head tipped up and turned to the sound
-    boy.j.spine.rotation.x = lerp(0.05, -0.1, gasp) + 0.012 * Math.sin(t * 1.5) * f
-    boy.j.spine.rotation.z = 0.03 * gasp
-    boy.j.shL.rotation.x = lerp(0, -0.55, gasp)
-    boy.j.shL.rotation.z = lerp(0.1, 0.22, gasp)
-    boy.j.elL.rotation.x = lerp(0, -1.25, gasp)
-    boy.j.shR.rotation.x = lerp(0, -0.35, gasp)
+    // dad stands beside him (on the boy's left, world +X), turned toward his son
+    dad.root.position.set(0.66, 0.95 * 1.08, 0.04)
+    dad.root.rotation.y = -Math.PI / 2 + 0.12
+    dad.j.spine.rotation.x = lerp(0.05, 0.26, smooth(0.0, 0.09, p)) * (1 - 0.5 * release)
+    dad.j.spine.rotation.y = 0.1 * smooth(0, 0.09, p)
+    dad.j.hpL.rotation.x = -0.1
+    dad.j.hpR.rotation.x = 0.12
+    dad.j.knL.rotation.x = 0.1
+    dad.j.knR.rotation.x = 0.07
+    dad.j.hpL.rotation.z = 0.06
+    dad.j.hpR.rotation.z = -0.06
+    dad.j.head.rotation.x = 0.08
+
+    // boy: chest full, shoulders lifted, one hand drawn up, the head tipped slightly into the palm
+    boy.j.spine.rotation.x = lerp(0.05, -0.08, gasp) + 0.018 * breath
+    boy.j.spine.rotation.z = -0.04 * cover
+    boy.j.shR.rotation.x = lerp(0, -0.55, gasp)
     boy.j.shR.rotation.z = lerp(-0.1, -0.2, gasp)
-    boy.j.elR.rotation.x = lerp(0, -1.1, gasp)
-    boy.j.head.rotation.x = lerp(0.05, -0.16, gasp)
-    boy.j.head.rotation.y = lerp(0, 0.22, gasp) + 0.02 * tremor
+    boy.j.elR.rotation.x = lerp(0, -1.3, gasp)
+    boy.j.shL.position.y = 0.5 + 0.03 * (gasp * 0.6 + 0.4 * cover + 0.5 * flinch)
+    boy.j.shR.position.y = 0.5 + 0.03 * (gasp * 0.6 + 0.4 * cover + 0.5 * flinch)
+    boy.j.head.rotation.x = lerp(0.05, -0.1, gasp) - 0.06 * flinch
+    boy.j.head.rotation.y = -0.05 * cover
+    boy.j.head.rotation.z = -(0.1 * cover + 0.07 * flinch) // leans toward dad's palm (his +X side)
     boy.j.hpL.rotation.z = 0.05
     boy.j.hpR.rotation.z = -0.05
     boy.j.knL.rotation.x = 0.06
     boy.j.knR.rotation.x = 0.06
-    // dad: leans over his son, one hand over the eyes, the other gripping the shoulder
-    dad.j.spine.rotation.x = lerp(0.04, 0.2, reach)
-    dad.j.head.rotation.x = 0.1
     limitPose(boy)
     limitPose(dad)
     groundFigure(boy, 0)
     groundFigure(dad, 0)
     boy.root.updateWorldMatrix(true, true)
     dad.root.updateWorldMatrix(true, true)
-    // hand over the eyes: on the *surface* of the face (skull radius 0.105 × scale), fingers across the brow
-    boy.headC.getWorldPosition(tmpV)
-    const k = 0.92
-    const eyes = tmpV.clone().add(new Vector3(0.0 + 0.004 * tremor, 0.02 * k, (0.105 + 0.05) * k))
-    solveArm(dad, 'R', eyes, reach, POLE_R)
-    // other hand on the boy's near shoulder
-    boy.j.shL.getWorldPosition(tmpV)
-    const shoulder = tmpV.clone().add(new Vector3(0.03, 0.09 * k, -0.01))
-    solveArm(dad, 'L', shoulder, reach * 0.95, POLE_L)
-    lookAt(dad, new Vector3(0, 1.4, 6), 0.8)
 
-    // ------------------------------------------------ camera drifts in, then holds perfectly still
+    // ---- dad's left hand → the boy's face. The target lives in the boy's *head space*, so the palm stays glued to him as he moves.
+    // (palm centre on the eye line, fingers spread across the upper face, the wrist just outside the cheek)
+    const hand = dad.hands.L
+    hand.grp.parent!.updateWorldMatrix(true, false)
+    dad.tipL.getWorldPosition(startL) // hanging-hand position (the start of the reach)
+    boy.j.head.updateWorldMatrix(true, false)
+    faceL.set(-0.03, 0.15, 0.13) // head-local: eye line, a little left of centre, just proud of the skull surface (z 0.107)
+    boy.j.head.localToWorld(faceP.copy(faceL))
+    // anticipation → arc → settle: the hand lifts out of the hanging pose and travels up and over, never straight through the head
+    tmpV.copy(faceP).sub(startL)
+    const arc = Math.sin(Math.PI * clamp01(reachC)) * 0.14
+    const lift = release * 0.22
+    handT.copy(startL).addScaledVector(tmpV, reachC)
+    handT.y += arc + lift
+    handT.x += lift * 0.9
+    handT.z += lift * 0.4
+    const press = 0.012 * cover * (1 - 0.6 * flinch) // palm presses a touch as it settles
+    handT.z -= press
+    poleL.set(0.5, 0.35, 1) // elbow out toward the camera and up
+    solveArm(dad, 'L', handT, 1, poleL)
+    palmFacing(dad, 'L', faceDir.set(0, 0, -1), smooth(0.0, 0.05, p)) // palm flat onto the face
+    setHand(dad, 'L', 0.03) // open, fingers extended across the brow
+
+    // ---- dad's right hand rests on the boy's near shoulder
+    boy.j.shL.getWorldPosition(tmpV)
+    dad.tipR.getWorldPosition(startR)
+    shoulderP.copy(tmpV).add(tmpB.set(0.015, 0.082 * K, -0.012))
+    const sR = easeOut(smooth(0.02, 0.1, p)) * (1 - 0.7 * release)
+    handR.copy(startR).lerp(shoulderP, sR)
+    handR.y += Math.sin(Math.PI * clamp01(sR)) * 0.07
+    poleR.set(0.3, -0.1, -1)
+    solveArm(dad, 'R', handR, 1, poleR)
+    palmFacing(dad, 'R', tmpC.set(0, -1, 0), sR)
+    setHand(dad, 'R', 0.18)
+
+    // ---- the boy's near hand rises to touch dad's wrist (underside, fingers wrapping)
+    dad.j.elL.getWorldPosition(tmpV)
+    dad.tipL.getWorldPosition(tmpB)
+    wristP.copy(tmpV).lerp(tmpB, 0.72).add(tmpC.set(0.0, -0.032, 0.03))
+    boy.tipL.getWorldPosition(startB)
+    const rise = easeOut(smooth(0.075, 0.13, p)) * (1 - release)
+    handB.copy(startB).lerp(wristP, rise)
+    poleB.set(0.5, -1, 0.3)
+    solveArm(boy, 'L', handB, 1, poleB)
+    setHand(boy, 'L', 0.3 + 0.55 * rise)
+    lookAt(dad, boy.headC.getWorldPosition(tmpV), 0.75)
+
+    // ------------------------------------------------ camera: a 3/4 side view that finds the hand over his eyes, then holds still
     const pos = keys(p, [
-      { p: 0, v: [0.5, 2.0, 7.6] },
-      { p: 0.12, v: [0.3, 1.8, 6.1] },
-      { p: 0.4, v: [0.15, 1.6, 4.9] },
-      { p: 1, v: [0.1, 1.55, 4.3] },
+      { p: 0, v: [1.9, 1.95, 6.4] },
+      { p: 0.12, v: [1.65, 1.8, 4.3] },
+      { p: 0.4, v: [1.35, 1.72, 3.4] },
+      { p: 1, v: [1.15, 1.68, 3.0] },
     ])
     pos[0] += Math.sin(t * 0.4) * 0.05 * f
     pos[1] += Math.sin(t * 0.33) * 0.03 * f
-    setCam(5, state.camera as never, pos, [0, 1.4, 0], lerp(42, 34, smooth(0, 0.8, p)), dt, { lambda: 3 + 8 * (1 - f), parallax: 0.08 * (0.2 + 0.8 * f) })
+    setCam(5, state.camera as never, pos, [0.3, 1.52, 0.1], lerp(40, 32, smooth(0, 0.8, p)), dt, { lambda: 3 + 8 * (1 - f), parallax: 0.08 * (0.2 + 0.8 * f) })
   })
 
   const n = useMemo(() => list.length, [list])
