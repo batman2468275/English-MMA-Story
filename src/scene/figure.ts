@@ -333,32 +333,8 @@ export function createFigure(mat: Material, scale = 1): Figure {
   const lL = mkLeg(1)
   const lR = mkLeg(-1)
 
-  // ---- fight shorts (own pivot at the waist so the hem can swing with the motion) + gold waistband
-  let shorts: Group | null = null
-  if (!ghost) {
-    shorts = new Group()
-    shorts.position.set(0, 0.07, 0)
-    const sg = new CylinderGeometry(0.15, 0.225, 0.3, 14, 4, true)
-    const sp = sg.attributes.position
-    for (let i = 0; i < sp.count; i++) {
-      // vertical folds: radial ripple that grows toward the hem
-      const a = Math.atan2(sp.getZ(i), sp.getX(i))
-      const hemK = (0.15 - sp.getY(i)) / 0.3
-      const r = 1 + 0.045 * hemK * Math.sin(a * 7 + hemK * 2)
-      sp.setX(i, sp.getX(i) * r)
-      sp.setZ(i, sp.getZ(i) * r)
-    }
-    sg.computeVertexNormals()
-    const trunks = new Mesh(sg, TRUNK_MAT)
-    trunks.position.y = -0.15
-    trunks.scale.set(1.2, 1, 0.92)
-    shorts.add(trunks)
-    const band = new Mesh(new TorusGeometry(0.152, 0.014, 6, 16), GOLD_MAT)
-    band.rotation.x = Math.PI / 2
-    band.scale.set(1.2, 0.92, 1)
-    shorts.add(band)
-    root.add(shorts)
-  }
+  // fight shorts / skirt removed: figures use the plain body + leg geometry
+  const shorts: Group | null = null
 
   const extra: Extra = {
     chest, chestTop, abdomen, headGeo, eyes, hair, shorts,
