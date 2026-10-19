@@ -343,3 +343,6 @@ button { font: inherit; color: inherit; }
   .copy-left, .copy-right { padding: 22px 26px; background: linear-gradient(90deg, rgba(3, 4, 7, 0.72), rgba(3, 4, 7, 0.5)); border-radius: 10px; }
   .para { text-shadow: 0 1px 12px rgba(0, 0, 0, 0.8); }
 }
+
+/* ?debug layer switch: hide every decorative page overlay */
+.dbg-no-overlays .rays, .dbg-no-overlays .scrim, .dbg-no-overlays [class*='scrim-'], .dbg-no-overlays .stage::after, .dbg-no-overlays .fence, .dbg-no-overlays .fx { display: none !important; }
