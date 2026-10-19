@@ -1,4 +1,4 @@
-import { CanvasTexture, LinearFilter, RepeatWrapping, SRGBColorSpace } from 'three'
+import { CanvasTexture, LinearMipmapLinearFilter, RepeatWrapping, SRGBColorSpace } from 'three'
 import { mulberry32 } from '../core/math'
 
 /**
@@ -19,7 +19,7 @@ function make(key: string, w: number, h: number, draw: (g: CanvasRenderingContex
   t.wrapS = t.wrapT = RepeatWrapping
   t.repeat.set(repeat[0], repeat[1])
   t.colorSpace = SRGBColorSpace
-  t.minFilter = LinearFilter
+  t.minFilter = LinearMipmapLinearFilter; t.generateMipmaps = true
   t.anisotropy = 4
   cache.set(key, t)
   return t

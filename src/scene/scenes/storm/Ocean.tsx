@@ -41,9 +41,14 @@ function polarGeometry(radial: number, angular: number, R: number) {
 const N_WAVES = WAVES.length
 
 export const Ocean = forwardRef<ShaderMaterial>((_props, ref) => {
-  const geom = useMemo(() => polarGeometry(store.mobile ? 70 : 120, store.mobile ? 110 : 210, 170), [])
+  const RAD = store.mobile ? 90 : 120
+  const ANG = store.mobile ? 150 : 210
+  const geom = useMemo(() => polarGeometry(RAD, ANG, 170), [RAD, ANG])
   const uniforms = useMemo(
     () => ({
+      // mesh spacing (see polarGeometry) so the shader can fade waves the grid is too coarse to sample (no aliasing stripes)
+      uArc: { value: (Math.PI * 2) / ANG },
+      uRadial: { value: (2.2 * 170) / RAD },
       uTime: { value: 0 },
       uAmp: { value: 1 },
       uFlash: { value: 0 },
@@ -66,20 +71,25 @@ export const Ocean = forwardRef<ShaderMaterial>((_props, ref) => {
         ref={ref}
         uniforms={uniforms}
         vertexShader={/* glsl */ `
-          uniform float uTime; uniform float uAmp; uniform float uPush;
+          uniform float uTime; uniform float uAmp; uniform float uPush; uniform float uArc; uniform float uRadial;
           uniform vec4 uWaves[${N_WAVES}]; uniform float uSpeeds[${N_WAVES}];
           varying vec3 vWorld; varying float vH; varying vec3 vN; varying float vSlope;
           void main(){
             vec3 p = position;
             float h = 0.0; float dhx = 0.0; float dhz = 0.0; vec2 push = vec2(0.0);
+            // grid spacing at this vertex: waves shorter than ~2 grid cells can't be drawn (they alias into stripes), so fade them out
+            float rr = length(position.xz);
+            float sp = max(rr * uArc, uRadial * pow(max(rr / 170.0, 0.001), 0.5455));
             for (int i = 0; i < ${N_WAVES}; i++) {
               vec4 w = uWaves[i];
+              float wt = 1.0 - smoothstep(0.28, 0.7, w.z * sp / 3.14159);
+              float aw = w.w * wt;
               float ph = w.z * (w.x * p.x + w.y * p.z) + uSpeeds[i] * uTime;
               float g = 0.5 + 0.5 * sin(ph);
-              h += w.w * (2.0 * g * g - 1.0);
-              float c = 2.0 * g * cos(ph) * w.w * w.z;
+              h += aw * (2.0 * g * g - 1.0);
+              float c = 2.0 * g * cos(ph) * aw * w.z;
               dhx += c * w.x; dhz += c * w.y;
-              push += vec2(w.x, w.y) * (w.w * 0.5 * cos(ph));
+              push += vec2(w.x, w.y) * (aw * 0.5 * cos(ph));
             }
             float pk = smoothstep(6.0, 22.0, length(p.xz));
             float f = uAmp * (0.45 + 0.55 * pk);
@@ -110,7 +120,8 @@ export const Ocean = forwardRef<ShaderMaterial>((_props, ref) => {
               vec2 q = wp * 0.55;
               float n1 = fbm(q + vec2(uTime * 0.35, uTime * 0.12));
               float n2 = fbm(q * 1.7 - vec2(uTime * 0.2, -uTime * 0.3) + 7.3);
-              N = normalize(N + vec3(n1 - 0.5, 0.0, n2 - 0.5) * (0.12 + 0.6 * amp));
+              float near = 1.0 - smoothstep(18.0, 70.0, distance(uCamPos, vWorld)); // far chop would shimmer into stripes
+              N = normalize(N + vec3(n1 - 0.5, 0.0, n2 - 0.5) * (0.12 + 0.6 * amp) * near);
             }
             vec3 V = normalize(uCamPos - vWorld);
             float ndv = max(dot(N, V), 0.0);
@@ -129,7 +140,8 @@ export const Ocean = forwardRef<ShaderMaterial>((_props, ref) => {
             vec3 Lb = normalize(uBoltPos - vWorld);
             vec3 Hb = normalize(Lb + V);
             float nh = max(dot(N, Hb), 0.0);
-            col += (pow(nh, 150.0) * 16.0 + pow(nh, 20.0) * 0.9) * uBoltI * vec3(0.75, 0.85, 1.0);
+            float farK = 1.0 - 0.6 * smoothstep(30.0, 110.0, distance(uCamPos, vWorld));
+            col += (pow(nh, 150.0) * 16.0 * farK + pow(nh, 20.0) * 0.9) * uBoltI * vec3(0.75, 0.85, 1.0);
             // soft general specular (cloud glow / dawn)
             vec3 L = normalize(vec3(-0.3, 0.7, 0.5));
             col += pow(max(dot(N, normalize(L + V)), 0.0), 80.0) * (0.1 + uFlash * 3.0 + uCalm * 0.3) * vec3(0.7, 0.82, 1.0);
@@ -139,7 +151,7 @@ export const Ocean = forwardRef<ShaderMaterial>((_props, ref) => {
             // whitecaps: foam where the swell is both high and steep, broken up into lace
             float crest = smoothstep(0.5, 0.9, hn);
             float steep = smoothstep(0.25, 0.75, vSlope);
-            float lace = uDetail > 0.5 ? fbm(wp * 1.25 + vec2(uTime * 0.25, uTime * 0.1)) : 0.5 + 0.5 * sin(wp.x * 2.7 + wp.y * 2.3 + uTime);
+            float lace = uDetail > 0.5 ? fbm(wp * 1.25 + vec2(uTime * 0.25, uTime * 0.1)) : noise(wp * 1.1 + vec2(uTime * 0.25, uTime * 0.1)) * 0.65 + noise(wp * 2.6 - vec2(uTime * 0.2, 0.0)) * 0.35; // (touch devices: two cheap noise taps — a sine here draws diagonal stripes)
             float foam = clamp(crest * 0.8 + steep * 0.7 - 0.35, 0.0, 1.0) * smoothstep(0.3, 0.62, lace + 0.15) * smoothstep(0.2, 0.9, uAmp);
             foam += smoothstep(0.55, 0.8, lace) * 0.22 * smoothstep(0.3, 1.0, uAmp); // trailing patches in the troughs
             foam = clamp(foam, 0.0, 1.0);

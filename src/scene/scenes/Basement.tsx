@@ -29,6 +29,19 @@ const screenMat = () =>
     fragmentShader: /* glsl */ `
       uniform float uTime; uniform float uBeat; uniform float uHot; varying vec2 vUv;
       float blob(vec2 p, vec2 c, float r){ return smoothstep(r, 0.0, length(p - c)); }
+      float cap(vec2 p, vec2 a, vec2 b, float r){ vec2 pa = p - a; vec2 ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h) - r; }
+      // a tiny fighter silhouette (head, torso, legs, lead arm) so the screen reads as a fight, not as two coloured dots
+      float fighter(vec2 p, vec2 c, float face, float punch, float t){
+        p -= c;
+        float bob = 0.006 * sin(t * 5.0);
+        float d = length(p - vec2(0.0, 0.128 + bob)) - 0.017;
+        d = min(d, cap(p, vec2(0.0, 0.03), vec2(0.0, 0.105 + bob), 0.019));
+        d = min(d, cap(p, vec2(0.0, 0.03), vec2(-0.022, -0.06), 0.011));
+        d = min(d, cap(p, vec2(0.0, 0.03), vec2(0.026, -0.058), 0.011));
+        d = min(d, cap(p, vec2(0.0, 0.092 + bob), vec2(face * (0.036 + 0.05 * punch), 0.09 + 0.012 * punch + bob), 0.009));
+        d = min(d, cap(p, vec2(0.0, 0.092 + bob), vec2(face * 0.028, 0.06 + bob), 0.009));
+        return smoothstep(0.0045, -0.0045, d);
+      }
       void main(){
         vec2 uv = vUv; vec2 p = uv - 0.5; p.x *= 1.78;
         vec3 col = vec3(0.03, 0.06, 0.16);
@@ -37,10 +50,15 @@ const screenMat = () =>
         col += smoothstep(0.014, 0.0, abs(oct - 0.36)) * vec3(0.7, 0.8, 1.0);
         vec2 a = vec2(-0.12 + 0.12 * sin(uTime * 0.9), 0.02 * sin(uTime * 1.9));
         vec2 b = vec2( 0.12 + 0.12 * sin(uTime * 0.8 + 2.0), 0.02 * sin(uTime * 1.3));
-        col += blob(p, a, 0.07) * vec3(1.0, 0.25, 0.2) + blob(p, b, 0.07) * vec3(0.3, 0.55, 1.0);
+        float pa = max(0.0, sin(uTime * 3.1)); float pb = max(0.0, sin(uTime * 2.3 + 1.7));
+        col += blob(p, a + vec2(0.0, 0.04), 0.14) * vec3(0.32, 0.07, 0.06) + blob(p, b + vec2(0.0, 0.04), 0.14) * vec3(0.09, 0.17, 0.32);
+        col += fighter(p, a - vec2(0.0, 0.03), 1.0, pa, uTime) * vec3(0.5, 0.05, 0.04) + fighter(p, b - vec2(0.0, 0.03), -1.0, pb, uTime) * vec3(0.04, 0.1, 0.34);
         col += blob(p, (a + b) * 0.5, 0.2) * vec3(0.18, 0.2, 0.35);
         col += step(0.06, uv.y) * step(uv.y, 0.1) * step(0.08, uv.x) * step(uv.x, 0.6) * vec3(0.5, 0.1, 0.12);
-        col *= 0.88 + 0.12 * sin(uv.y * 420.0 + uTime * 12.0);
+        // scanlines: only as fine as the display can resolve (420 cycles aliased into moiré bands on small / hi-dpi screens)
+        float sl = uv.y * 110.0 + uTime * 2.0;
+        float slFade = 1.0 - smoothstep(0.18, 0.4, fwidth(sl)); // cycles per pixel: fade out before it can alias
+        col *= 1.0 - 0.1 * slFade * (0.5 + 0.5 * sin(sl * 6.2831853));
         col *= 0.9 + 0.14 * sin(uTime * 31.0) * sin(uTime * 7.0);
         col *= 1.5 + uBeat * 0.9 + uHot * 0.8;
         gl_FragColor = vec4(col, 1.0);

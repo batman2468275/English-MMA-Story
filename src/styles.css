@@ -51,7 +51,7 @@ button { font: inherit; color: inherit; }
 }
 /* Layer: light rays raking in from the top-right */
 .rays {
-  background: repeating-conic-gradient(from 188deg at 92% -12%, rgba(255, 255, 255, 0.07) 0 1.2deg, transparent 1.2deg 5.5deg);
+  background: repeating-conic-gradient(from 188deg at 92% -12%, transparent 0deg, rgba(255, 255, 255, 0.07) 0.6deg, transparent 1.3deg, transparent 5.5deg); /* soft-edged: hard 1px stops alias into jagged moiré on hi-dpi screens */
   -webkit-mask-image: radial-gradient(ellipse 85% 85% at 92% 0%, #000 0%, transparent 72%);
   mask-image: radial-gradient(ellipse 85% 85% at 92% 0%, #000 0%, transparent 72%);
   mix-blend-mode: screen;
@@ -201,8 +201,8 @@ button { font: inherit; color: inherit; }
 .fence-mesh, .fence-fill {
   position: absolute; inset: 0;
   background-image:
-    repeating-linear-gradient(45deg, transparent 0 8px, var(--fl, rgba(255, 255, 255, 0.16)) 8px 9px),
-    repeating-linear-gradient(-45deg, transparent 0 8px, var(--fl, rgba(255, 255, 255, 0.16)) 8px 9px);
+    repeating-linear-gradient(45deg, transparent 0, transparent 7.4px, var(--fl, rgba(255, 255, 255, 0.16)) 8.2px, transparent 9px),
+    repeating-linear-gradient(-45deg, transparent 0, transparent 7.4px, var(--fl, rgba(255, 255, 255, 0.16)) 8.2px, transparent 9px);
   border-left: 2px solid rgba(255, 255, 255, 0.22);
 }
 .fence-fill-wrap { position: absolute; inset: 0; overflow: hidden; }

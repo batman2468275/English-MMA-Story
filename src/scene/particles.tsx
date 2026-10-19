@@ -103,9 +103,15 @@ export function ParticleField({
             p += normalize(p + 1e-4) * ring * 2.2;
             vec4 mv = modelViewMatrix * vec4(p, 1.0);
             gl_Position = projectionMatrix * mv;
-            gl_PointSize = uSize * uPR * (0.5 + aSeed.w) * (10.0 / max(0.5, -mv.z));
+            // size is clamped: GPUs cap point size differently, and an unbounded near-camera mote becomes a huge coloured disc
+            float ps = uSize * uPR * (0.5 + aSeed.w) * (10.0 / max(0.5, -mv.z));
+            gl_PointSize = clamp(ps, 1.5 * uPR, 34.0 * uPR);
             float tw = 0.65 + 0.35 * sin(uTime * 2.0 + aSeed.x * 40.0);
-            vA = (0.35 + 0.65 * aSeed.w) * tw * (1.0 + ring * 4.0);
+            // fade at the edges of the wrap box (no pop in / out as motes loop round) and right in front of the lens
+            vec3 q = abs(p / uBox) * 2.0;
+            float edge = (1.0 - smoothstep(0.82, 1.0, q.x)) * (1.0 - smoothstep(0.82, 1.0, q.y)) * (1.0 - smoothstep(0.82, 1.0, q.z));
+            float near = smoothstep(0.4, 2.2, -mv.z);
+            vA = (0.35 + 0.65 * aSeed.w) * tw * (1.0 + ring * 4.0) * edge * near;
           }`}
         fragmentShader={/* glsl */ `
           uniform vec3 uColor; uniform float uOpacity; varying float vA;
