@@ -20,6 +20,8 @@ button { font: inherit; color: inherit; }
 /* ---------- 3D stage + sections ---------- */
 .stage { position: fixed; inset: 0; z-index: 0; background: #000; }
 .stage canvas { display: block; }
+/* touch devices skip the post-processing pass, so the cinematic vignette is painted here instead */
+.mobile .stage::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse 80% 75% at 50% 50%, transparent 52%, rgba(0, 0, 0, 0.5) 100%); }
 .story { position: relative; z-index: 2; }
 .section { position: relative; }
 .stick { position: sticky; top: 0; height: 100vh; height: 100svh; overflow: hidden; }

@@ -43,6 +43,23 @@ function Precompile({ onReady }: { onReady: () => void }) {
   return null
 }
 
+/** ?debug — a small on-screen readout (build, renderer, pipeline) so a screenshot says exactly what a device is running. */
+function DebugBadge() {
+  const { gl } = useThree()
+  useEffect(() => {
+    if (!new URLSearchParams(location.search).has('debug')) return
+    const ctx = gl.getContext()
+    const ext = ctx.getExtension('WEBGL_debug_renderer_info')
+    const gpu = ext ? String(ctx.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : 'unknown'
+    const el = document.createElement('div')
+    el.style.cssText = 'position:fixed;left:8px;top:8px;z-index:9999;max-width:90vw;padding:6px 9px;background:rgba(0,0,0,.8);color:#9f9;font:11px/1.4 monospace;border-radius:6px;pointer-events:none'
+    el.textContent = `build ${__BUILD__} | ${store.mobile ? 'touch pipeline (direct)' : 'desktop pipeline (post)'} | dpr ${gl.getPixelRatio().toFixed(2)} | ${gpu}`
+    document.body.appendChild(el)
+    return () => el.remove()
+  }, [gl])
+  return null
+}
+
 function FrameClock() {
   useFrame((state) => {
     store.time = state.clock.elapsedTime
@@ -61,17 +78,20 @@ export default function Experience({ onReady }: { onReady: () => void }) {
       <Canvas
         dpr={store.lite ? 0.7 : dpr}
         camera={{ fov: 55, near: 0.1, far: 500, position: [0, 2, 12] }}
-        gl={{ antialias: false, powerPreference: 'high-performance', alpha: false, stencil: false }}
+        // phones/tablets render straight to the screen (real MSAA, no post-processing buffers); desktops keep the full post chain
+        flat={mobile}
+        gl={{ antialias: mobile && !store.lite, powerPreference: 'high-performance', alpha: false, stencil: false }}
       >
         <PerformanceMonitor
           onDecline={() => setDpr((d) => Math.max(0.85, d - 0.25))}
           onIncline={() => setDpr((d) => Math.min(mobile ? 1.75 : 2, d + 0.15))}
         />
         <FrameClock />
+        <DebugBadge />
         <Suspense fallback={null}>
           <Scenes />
           <Rig />
-          <Post />
+          {!mobile && <Post />}
           <Precompile onReady={onReady} />
         </Suspense>
       </Canvas>
