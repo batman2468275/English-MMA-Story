@@ -40,8 +40,9 @@ export function setCam(
   }
   // Composition: slide the 3D subject away from where the text sits (text left → subject right, etc.)
   const side = chapters[index]?.side
-  const wantX = store.mobile ? 0 : side === 'left' ? 0.17 : side === 'right' ? -0.17 : 0
-  const wantY = store.mobile && side !== undefined && index !== 4 ? 0.2 : !store.mobile && index === 13 ? 0.2 : 0
+  const tall = store.mobile && window.innerWidth < window.innerHeight * 1.05 // phone / upright tablet: stacked layout
+  const wantX = tall ? 0 : side === 'left' ? 0.17 : side === 'right' ? -0.17 : 0
+  const wantY = tall && side !== undefined && index !== 4 ? 0.2 : !tall && index === 13 ? 0.2 : 0
   s.fx = damp(s.fx, wantX, 3, dt)
   s.fy = damp(s.fy, wantY, 3, dt)
   const snap = store.frame - s.seen > 3

@@ -3,6 +3,7 @@ import { useFrame } from '@react-three/fiber'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import { BloomEffect } from 'postprocessing'
 import { GradeEffect } from './GradeEffect'
+import { UnsignedByteType } from 'three'
 import { store } from '../core/store'
 
 /**
@@ -24,12 +25,13 @@ export function Post() {
     grade.set('uWarp', f.warp)
     grade.set('uShockR', f.shockR)
     grade.set('uShockAmp', f.shockAmp)
-    grade.set('uGrain', f.grain)
+    grade.set('uGrain', f.grain * (store.mobile ? 0.55 : 1))
     if (bloom.current) bloom.current.intensity = f.bloom
   })
 
   return (
-    <EffectComposer multisampling={store.mobile || store.lite ? 0 : 4}>
+    // phones/tablets: 8-bit frame buffer (half-float buffers give coloured speckle on some mobile GPUs) + light MSAA for clean edges
+    <EffectComposer multisampling={store.lite ? 0 : store.mobile ? 2 : 4} frameBufferType={store.mobile || store.lite ? UnsignedByteType : undefined}>
       {store.mobile || store.lite ? (
         <primitive object={grade} dispose={null} />
       ) : (

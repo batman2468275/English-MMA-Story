@@ -99,7 +99,7 @@ export function ParticleField({
             p.z += cos(t * 0.6 + aSeed.y * 20.0) * 0.35;
             p = mod(p + uBox * 0.5, uBox) - uBox * 0.5;
             float d = length(p);
-            float ring = exp(-pow((d - uShockR) * 0.9, 2.0)) * uShockAmp;
+            float ring = exp(-pow(abs((d - uShockR) * 0.9), 2.0)) * uShockAmp;
             p += normalize(p + 1e-4) * ring * 2.2;
             vec4 mv = modelViewMatrix * vec4(p, 1.0);
             gl_Position = projectionMatrix * mv;

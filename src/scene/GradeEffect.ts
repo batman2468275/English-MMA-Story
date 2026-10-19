@@ -32,7 +32,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // shockwave ring
   vec2 sc = uv - uShockC;
   float sr = length(sc);
-  float ring = exp(-pow((sr - uShockR) * 11.0, 2.0)) * uShockAmp;
+  float ring = exp(-pow(abs((sr - uShockR) * 11.0), 2.0)) * uShockAmp;
   d += (sc / (sr + 1e-5)) * ring * 0.05;
 
   // time dilation: slow radial wobble
@@ -57,6 +57,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   col = mix(vec3(l), col, uSat);
   col *= 1.0 - uVignette * smoothstep(0.28, 0.95, r * 1.45);
   col += (hash(uv * 1000.0 + fract(uTime)) - 0.5) * uGrain;
+  col = max(col, vec3(0.0)); // NaN/negative guard (phone GPUs)
   outputColor = vec4(col, inputColor.a);
 }
 `

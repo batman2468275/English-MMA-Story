@@ -34,7 +34,7 @@ export function rimMaterial(base: string, rim: string, power = 2.4, intensity = 
       uniform vec3 uLightPos; uniform vec3 uLightCol; uniform float uLightI;
       varying vec3 vN; varying vec3 vV; varying vec3 vNW; varying vec3 vWP;
       void main(){
-        float f = pow(1.0 - max(dot(normalize(vN), normalize(vV)), 0.0), uPow);
+        float f = pow(max(1.0 - max(dot(normalize(vN), normalize(vV)), 0.0), 0.0), uPow);
         vec3 L = uLightPos - vWP; float d = length(L); L /= max(d, 0.001);
         float lam = max(dot(normalize(vNW), L), 0.0);
         vec3 lit = uLightCol * (lam * uLightI / (1.0 + 0.06 * d * d));
@@ -78,7 +78,7 @@ export function glowMaterial(color: string | Color, opacity = 1, side = DoubleSi
       void main(){
         float f = abs(dot(normalize(vN), normalize(vV)));
         // brighter toward the apex (uv.y = 1) of cones — light shafts are strongest near the source
-        float a = pow(f, 1.5) * (0.12 + 0.88 * vUv.y);
+        float a = pow(max(f, 0.0), 1.5) * (0.12 + 0.88 * vUv.y);
         gl_FragColor = vec4(uColor, a * uOpacity);
       }`,
   })

@@ -57,7 +57,7 @@ export function Sunset() {
           void main(){
             vec2 p = vUv - 0.5; float r = length(p); float a = atan(p.y, p.x);
             float rays = 0.5 + 0.5 * sin(a * 18.0 + uTime * 0.15) * sin(a * 7.0 - uTime * 0.1);
-            rays = pow(rays, 3.0);
+            rays = pow(max(rays, 0.0), 3.0);
             float fall = smoothstep(0.5, 0.0, r);
             gl_FragColor = vec4(vec3(1.0, 0.62, 0.25) * rays * fall * 1.6, rays * fall * 0.55);
           }`,
