@@ -5,10 +5,10 @@ import { indexOf } from '../content/story'
 import { lerp, mulberry32, smooth } from '../core/math'
 
 /**
- * EXPERIMENTAL DRAFT (preview only: load the site with ?music=experimental — see src/audio/select.ts).
- * Differences from engine.ts:
+ * The live score.
  *   • the heartbeat is confined to driveway → basement → Van (building until the ground-strike stinger), fades out after the
- *     Van chapter and only returns as a faint, deliberate echo when the closing chord lands in "Now"
+ *     Van chapter, comes back for the Kara-France choke (racing as it tightens, slowing and stopping at the release), and
+ *     returns once more as a faint, deliberate echo when the closing chord lands in "Now"
  *   • the violin never starts cold: a held, very quiet tone (a tone of the chord already sounding) is pre-rolled under the
  *     previous chapter, then prominence rises over ~14 s from sustained tone → long notes → full phrases; section changes add a
  *     short neutral pivot chord (root + 5th + 9th, no third) so key handoffs never clash
@@ -53,6 +53,10 @@ const mixes: Record<string, Mix> = {
   flow: { rain: 0, crowd: 0, drone: 0.2, heart: 0 },
   timeline: { rain: 0, crowd: 0, drone: 0.25, heart: 0 },
   now: { rain: 0, crowd: 0, drone: 0.3, heart: 0 }, // the closing callback is a one-shot echo inside resolve()
+}
+/** stinger output trims (stingers bypass the bus compressor, which used to level them) */
+const TRIM: Record<HitName, number> = {
+  'van-hit': 0.83, 'ground-hit': 0.64, 'storm-grab': 0.78, 'choke-tight': 1.6, 'choke-release': 0.44, 'foot-crack': 0.52, 'foot-heal': 1,
 }
 /** chapters whose NEXT section brings in the violin: a quiet held violin tone starts under them from `from` (local progress) */
 const PRE_ROLL: Record<string, number> = { storm: 0.62, mma: 0.78 }
@@ -188,6 +192,10 @@ class Engine {
   music!: GainNode
   gains: Record<'rain' | 'crowd' | 'drone' | 'heart' | 'pad' | 'lead' | 'pulse' | 'drums' | 'bass' | 'riser', GainNode> = {} as never
   send!: GainNode
+  sfx!: GainNode // stingers (knock-down, strikes…) go here, in parallel with the bus compressor, so hits stay big and punchy
+  sat!: Float32Array // tanh curve: adds mid-bass harmonics to thumps so they are audible on laptop / tablet / phone speakers
+  soft!: Float32Array // gentler tanh curve: the stingers' tonal layers share a soft limiter (loud and full, no spiky peaks)
+  bodyBeat = false // heartbeat thumps get that extra mid-bass body (the choke)
   riserBp!: BiquadFilterNode
   noiseBuf!: AudioBuffer
   bpm = 70 // heartbeat tempo
@@ -265,7 +273,29 @@ class Engine {
     comp.attack.value = 0.01
     comp.release.value = 0.25
     this.master.connect(comp)
-    comp.connect(c.destination)
+    // stingers skip the compressor (it would flatten them to a whisper); both meet at a soft ceiling that is transparent
+    // below 0.8 and rounds off anything above it, so stacked hits can never hard-clip the output
+    this.sfx = c.createGain()
+    this.sfx.gain.value = 0
+    const mixBus = c.createGain()
+    comp.connect(mixBus)
+    this.sfx.connect(mixBus)
+    const ceil = c.createWaveShaper()
+    const cv = new Float32Array(2049)
+    for (let i = 0; i < cv.length; i++) {
+      const x = (i / (cv.length - 1)) * 2 - 1
+      const a = Math.abs(x)
+      cv[i] = Math.sign(x) * (a <= 0.8 ? a : 0.8 + 0.17 * Math.tanh((a - 0.8) / 0.17))
+    }
+    ceil.curve = cv // (no oversampling: a hard guarantee that nothing leaves above 0.94)
+    mixBus.connect(ceil)
+    ceil.connect(c.destination)
+    const sc = new Float32Array(2049)
+    for (let i = 0; i < sc.length; i++) sc[i] = Math.tanh(4 * ((i / (sc.length - 1)) * 2 - 1)) / Math.tanh(4)
+    this.sat = sc
+    const sf = new Float32Array(2049)
+    for (let i = 0; i < sf.length; i++) sf[i] = Math.tanh(2.2 * ((i / (sf.length - 1)) * 2 - 1)) / Math.tanh(2.2)
+    this.soft = sf
     const mk = (dest: AudioNode = this.master) => {
       const g = c.createGain()
       g.gain.value = 0
@@ -358,8 +388,8 @@ class Engine {
     const horizon = now + 0.3
     while (this.nextBeat < horizon) {
       if (this.heartLvl > 0.02) {
-        this.thump(this.nextBeat, 1)
-        this.thump(this.nextBeat + 0.22, 0.65)
+        this.thump(this.nextBeat, 1, this.bodyBeat)
+        this.thump(this.nextBeat + 0.22, 0.65, this.bodyBeat)
       }
       this.nextBeat += 60 / this.bpm
     }
@@ -678,7 +708,20 @@ class Engine {
     this.track(o)
   }
 
-  private thump(t: number, v: number) {
+  /** a thump with mid-bass body: a sine glide pushed through a tanh shaper (odd harmonics) and low-passed — no noise, no rattle */
+  private bodyHit(dest: AudioNode, at: number, f0: number, f1: number, len: number, v: number, cut = 320) {
+    const c = this.ctx!
+    const o = c.createOscillator(); o.type = 'sine'
+    o.frequency.setValueAtTime(f0, at); o.frequency.exponentialRampToValueAtTime(f1, at + len)
+    const ws = c.createWaveShaper(); ws.curve = this.sat; ws.oversample = '2x'
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = cut; lp.Q.value = 0.5
+    const g = c.createGain()
+    g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(v, at + 0.004); g.gain.exponentialRampToValueAtTime(0.001, at + len * 1.6)
+    o.connect(ws); ws.connect(lp); lp.connect(g); g.connect(dest)
+    o.start(at); o.stop(at + len * 1.7)
+  }
+
+  private thump(t: number, v: number, body = false) {
     const c = this.ctx!
     const o = c.createOscillator()
     o.type = 'sine'
@@ -690,6 +733,7 @@ class Engine {
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.2)
     o.connect(g); g.connect(this.gains.heart)
     o.start(t); o.stop(t + 0.25)
+    if (body) this.bodyHit(this.gains.heart, t, 170, 62, 0.13, v * 0.55, 300)
   }
 
   /** the closing resolution: C-major swell across strings, a high violin line and a shimmer of bells */
@@ -756,8 +800,11 @@ class Engine {
       this.ctx!.resume()
       this.master.gain.cancelScheduledValues(0)
       this.master.gain.setTargetAtTime(0.85, this.ctx!.currentTime, 0.4)
+      this.sfx.gain.cancelScheduledValues(0)
+      this.sfx.gain.setTargetAtTime(1, this.ctx!.currentTime, 0.4)
     } else if (this.ctx) {
       this.master.gain.setTargetAtTime(0, this.ctx.currentTime, 0.25)
+      this.sfx.gain.setTargetAtTime(0, this.ctx.currentTime, 0.25)
     }
   }
 
@@ -830,11 +877,20 @@ class Engine {
       this.tempoMul = lerp(0.95, 1.12, this.intensity)
     }
     this.bpm = m.bpm ?? 70
-    // heartbeat: present only driveway → basement → Van, and in the Van it builds (louder + quicker) toward the ground strikes
+    this.bodyBeat = false
+    // heartbeat: present driveway → basement → Van, and in the Van it builds (louder + quicker) toward the ground strikes
     if (id === 'van') {
       const pv = store.local[store.active]
       heart = lerp(0.3, 1.0, smooth(0.15, 0.95, pv))
       this.bpm = lerp(84, 112, smooth(0.3, 0.95, pv))
+    }
+    // …and again in the Kara-France choke: it starts as the lock closes, races and swells while the squeeze tightens, then
+    // slows, weakens and stops as he taps out and is let go
+    if (id === 'sunset') {
+      const pc = store.local[store.active]
+      heart = smooth(0.36, 0.44, pc) * (1 - smooth(0.7, 0.84, pc)) * lerp(0.5, 0.72, smooth(0.4, 0.6, pc))
+      this.bpm = lerp(lerp(70, 124, smooth(0.38, 0.6, pc)), 54, smooth(0.62, 0.82, pc))
+      this.bodyBeat = true
     }
     this.heartLvl = heart
     // violin pre-roll under the chapter before a violin section (storm → its release, partners → foot)
@@ -866,7 +922,7 @@ class Engine {
       const p = store.local[store.active]
       const tight = smooth(0.38, 0.62, p) * (1 - smooth(0.78, 0.84, p))
       pad *= 1 + 0.9 * tight
-      riser = Math.max(riser, tight * 0.16) // tension comes from the swelling strings + riser (no heartbeat here)
+      riser = Math.max(riser, tight * 0.16) // tension: swelling strings + riser, with the heartbeat (above) racing underneath
       this.riserBp.frequency.setTargetAtTime(220 + tight * 1500, t, 0.3)
     }
     // the bone snaps: the score ducks for a breath (stingers do the rest)
@@ -906,12 +962,17 @@ class Engine {
     if (t - (this.lastHit[kind] ?? -9) < (kind === 'ground-hit' ? 0.12 : 0.8)) return
     this.lastHit[kind] = t
     const out = c.createGain()
-    out.connect(this.master)
+    out.connect(this.sfx)
+    // the tonal layers (sine drops + saturated body) share a soft limiter: they come out loud and full, without spiky peaks
+    const tone = c.createGain()
+    tone.gain.value = 0.85
+    const tlim = c.createWaveShaper(); tlim.curve = this.soft
+    tone.connect(tlim); tlim.connect(out)
     const sub = (f0: number, f1: number, len: number, v: number, at = t) => {
       const o = c.createOscillator(); o.type = 'sine'
       o.frequency.setValueAtTime(f0, at); o.frequency.exponentialRampToValueAtTime(f1, at + len)
       const g = c.createGain(); g.gain.setValueAtTime(v, at); g.gain.exponentialRampToValueAtTime(0.001, at + len * 1.4)
-      o.connect(g); g.connect(out); o.start(at); o.stop(at + len * 1.5)
+      o.connect(g); g.connect(tone); o.start(at); o.stop(at + len * 1.5)
     }
     const burst = (freq: number, q: number, len: number, v: number, type: BiquadFilterType = 'bandpass', at = t) => {
       const n = c.createBufferSource(); n.buffer = this.noiseBuf
@@ -933,20 +994,28 @@ class Engine {
       })
     }
 
+    // per-stinger trim: these skip the bus compressor, so each is level-matched by ear-and-meter (see git log)
+    out.gain.value = TRIM[kind]
     if (kind === 'van-hit') {
-      // the knock-down: one big bass thump (sine dropping 120 → 34 Hz) under a soft rumbling crowd roar that swells in — no noisy rattle
-      sub(120, 34, 0.35, 1)
+      // the knock-down: a BIG bass thump — the deep sine drop (120 → 34 Hz) plus a saturated mid-bass body and a dull "dum" punch on top
+      // so it is felt on small speakers too — under a soft rumbling crowd roar that swells in. No noisy rattle.
+      sub(120, 34, 0.42, 0.9)
+      this.bodyHit(tone, t, 165, 58, 0.3, 0.9, 340)
+      this.bodyHit(tone, t, 300, 95, 0.07, 0.6, 450)
       const roar = this.noise('brown')
       const rf = c.createBiquadFilter(); rf.type = 'bandpass'; rf.frequency.value = 900; rf.Q.value = 0.5
-      const rg = c.createGain(); rg.gain.setValueAtTime(0, t); rg.gain.linearRampToValueAtTime(0.9, t + 0.15); rg.gain.exponentialRampToValueAtTime(0.001, t + 1.6)
+      const rg = c.createGain(); rg.gain.setValueAtTime(0, t); rg.gain.linearRampToValueAtTime(0.8, t + 0.15); rg.gain.exponentialRampToValueAtTime(0.001, t + 1.6)
       roar.connect(rf); rf.connect(rg); rg.connect(out); roar.start(t); roar.stop(t + 1.7)
-      this.duckUntil = t + 0.5
+      this.duckUntil = t + 0.7
     } else if (kind === 'ground-hit') {
-      sub(95, 38, 0.2, 0.7)
-      burst(1400, 0.8, 0.07, 0.35)
+      // each ground-and-pound strike: a solid thud with body, and only a faint click on top
+      sub(105, 40, 0.22, 0.8)
+      this.bodyHit(tone, t, 200, 72, 0.14, 0.9, 380)
+      burst(1400, 0.8, 0.07, 0.28)
     } else if (kind === 'storm-grab') {
-      // payoff: deep boom + a rising major shimmer chord as the sea lets go
+      // payoff: deep boom (with mid-bass body) + a rising major shimmer chord as the sea lets go
       sub(90, 30, 1.2, 1.2)
+      this.bodyHit(tone, t, 150, 52, 0.7, 0.55, 320)
       ;[261.6, 329.6, 392, 523.3, 659.3].forEach((fr, i) => {
         const s = c.createOscillator(); s.type = 'triangle'; s.frequency.value = fr
         const sg = c.createGain()
@@ -965,8 +1034,9 @@ class Engine {
       sub(70, 40, 1.2, 0.6)
       chordSwell([146.83, 185, 220, 293.66, 369.99], 1.3, 3.5, 0.045, 1700, 'triangle')
     } else if (kind === 'foot-crack') {
-      burst(2200, 0.6, 0.07, 1.1, 'highpass') // the snap
+      burst(2200, 0.6, 0.07, 0.6, 'highpass') // the snap
       sub(70, 28, 0.3, 1)
+      this.bodyHit(tone, t, 160, 55, 0.3, 0.7, 340)
       burst(500, 0.8, 0.4, 0.3, 'bandpass', t + 0.05)
       this.duckUntil = t + 1.4
     } else if (kind === 'foot-heal') {
