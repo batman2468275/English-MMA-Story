@@ -55,7 +55,7 @@ function FrameClock() {
 export default function Experience({ onReady }: { onReady: () => void }) {
   const mobile = store.mobile
   // adaptive resolution: if the frame rate drops, render at a lower pixel ratio; recover when it's healthy again
-  const [dpr, setDpr] = useState<number>(mobile ? 1.25 : 1.6)
+  const [dpr, setDpr] = useState<number>(mobile ? Math.min(Math.max(window.devicePixelRatio, 1), 1.75) : 1.6)
   return (
     <div className="stage" aria-hidden="true">
       <Canvas
@@ -65,7 +65,7 @@ export default function Experience({ onReady }: { onReady: () => void }) {
       >
         <PerformanceMonitor
           onDecline={() => setDpr((d) => Math.max(0.85, d - 0.25))}
-          onIncline={() => setDpr((d) => Math.min(mobile ? 1.5 : 2, d + 0.15))}
+          onIncline={() => setDpr((d) => Math.min(mobile ? 1.75 : 2, d + 0.15))}
         />
         <FrameClock />
         <Suspense fallback={null}>

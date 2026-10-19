@@ -64,9 +64,10 @@ export function ParticleField({
     [],
   )
 
-  useFrame((_, dt) => {
+  useFrame(({ gl }, dt) => {
     const m = mat.current
     if (!m) return
+    m.uniforms.uPR.value = gl.getPixelRatio() // point size must follow the canvas's real pixel ratio (adaptive dpr), not the device's
     t.current += Math.min(dt, 0.05) * (speed ? speed() : 1)
     m.uniforms.uTime.value = t.current
     if (shock) {

@@ -44,7 +44,7 @@ export const GradientSky = forwardRef<ShaderMaterial, GradientSkyProps>(
           fragmentShader={/* glsl */ `
             uniform vec3 uTop; uniform vec3 uMid; uniform vec3 uHor; uniform vec3 uSun; uniform float uSunSize; uniform vec3 uSunColor; uniform float uStars; uniform float uTime;
             varying vec3 vDir;
-            float hash(vec3 p){ return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+            float hash(vec3 p){ p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
             void main(){
               vec3 d = normalize(vDir);
               float h = clamp(d.y, -0.2, 1.0);

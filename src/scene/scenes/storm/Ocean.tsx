@@ -96,7 +96,7 @@ export const Ocean = forwardRef<ShaderMaterial>((_props, ref) => {
           uniform float uCalm; uniform vec3 uBoltPos; uniform float uBoltI; uniform float uDetail;
           varying vec3 vWorld; varying float vH; varying vec3 vN; varying float vSlope;
 
-          float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+          float hash(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
           float noise(vec2 p){ vec2 i = floor(p); vec2 f = fract(p); f = f*f*(3.0-2.0*f);
             return mix(mix(hash(i), hash(i+vec2(1.0,0.0)), f.x), mix(hash(i+vec2(0.0,1.0)), hash(i+vec2(1.0,1.0)), f.x), f.y); }
           float fbm(vec2 p){ float a = 0.5; float s = 0.0; for (int i = 0; i < 3; i++) { s += a * noise(p); p *= 2.03; a *= 0.5; } return s; }

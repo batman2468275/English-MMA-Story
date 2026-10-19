@@ -39,7 +39,7 @@ export const Sky = forwardRef<ShaderMaterial>((_p, ref) => {
         fragmentShader={/* glsl */ `
           uniform float uTime; uniform float uFlash; uniform float uCalm; uniform vec3 uHorizon; uniform vec3 uZenith; uniform vec3 uBoltDir;
           varying vec3 vDir;
-          float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+          float hash(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
           float noise(vec2 p){ vec2 i = floor(p); vec2 f = fract(p); f = f*f*(3.0-2.0*f);
             return mix(mix(hash(i), hash(i+vec2(1,0)), f.x), mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y); }
           float fbm(vec2 p){ float a = 0.5; float s = 0.0; for(int i=0;i<${store.mobile ? 3 : 5};i++){ s += a*noise(p); p *= 2.07; a *= 0.5; } return s; }

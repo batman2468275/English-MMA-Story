@@ -20,7 +20,8 @@ uniform float uShockAmp;
 uniform float uGrain;
 uniform vec2 uShockC;
 
-float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+// sine-free hash: sin(x*43758) loses precision on mobile GPUs and renders as coloured dot patterns
+float hash(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor){
   vec2 p = uv - 0.5;

@@ -266,14 +266,16 @@ button { font: inherit; color: inherit; }
 @keyframes eq { 0%, 100% { height: 3px; } 50% { height: 14px; } }
 
 /* ---------- Mobile ---------- */
-@media (max-width: 820px) {
+/* phones, and any touch device held upright (iPad portrait) get the stacked, bottom-sheet layout */
+@media (max-width: 820px), (pointer: coarse) and (orientation: portrait) {
   .stick { overflow: hidden; }
   .copy, .copy-left, .copy-right {
     left: 18px; right: 46px; top: auto; bottom: 7svh; width: auto; transform: none; text-align: left;
   }
   .copy-center { left: 18px; right: 46px; top: auto; bottom: 7svh; width: auto; transform: none; text-align: left; }
   .copy-center .chapter-title::after { margin-left: 0; }
-  .scrim-left, .scrim-right, .scrim-center { background: linear-gradient(0deg, rgba(3, 4, 7, 0.94) 0%, rgba(3, 4, 7, 0.78) 48%, rgba(3, 4, 7, 0.15) 80%, transparent 100%); }
+  .scrim-left, .scrim-right, .scrim-center { background: linear-gradient(0deg, rgba(3, 4, 7, 0.96) 0%, rgba(3, 4, 7, 0.88) 55%, rgba(3, 4, 7, 0.4) 82%, transparent 100%); }
+  .para, .chapter-title, .copy .kicker { text-shadow: 0 1px 14px rgba(0, 0, 0, 0.85); }
   .chapter-title { font-size: clamp(2.4rem, 12vw, 3.6rem); margin: 0.15em 0 0.25em; }
   .para, .copy-center .para, .now-copy .para { font-size: 0.95rem; line-height: 1.55; }
   .bgword span { font-size: 40vw; }
@@ -333,3 +335,9 @@ button { font: inherit; color: inherit; }
 .reduced .sec-now { background: linear-gradient(180deg, #02030a, #0b1230); }
 .reduced .loader { transition: none; }
 
+
+/* touch devices held sideways (iPad landscape, phones on their side): keep the story text on a soft dark panel so it never fights the 3D scene */
+@media (pointer: coarse) and (orientation: landscape) and (min-width: 821px) {
+  .copy-left, .copy-right { padding: 22px 26px; background: linear-gradient(90deg, rgba(3, 4, 7, 0.72), rgba(3, 4, 7, 0.5)); border-radius: 10px; }
+  .para { text-shadow: 0 1px 12px rgba(0, 0, 0, 0.8); }
+}

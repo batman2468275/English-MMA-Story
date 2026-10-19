@@ -24,6 +24,7 @@ export function Loader({ ready, onDone }: { ready: boolean; onDone: () => void }
       if (ready && (skip || elapsed > 1.4) && shown.current > 0.985 && !done.current) {
         done.current = true
         setPct(100)
+        if (root.current) root.current.style.pointerEvents = 'none'
         gsap.to(root.current, {
           opacity: 0,
           duration: 0.9,
@@ -39,7 +40,17 @@ export function Loader({ ready, onDone }: { ready: boolean; onDone: () => void }
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
+    // safety net: if a phone throttles animation frames or the fade stalls, never leave the loader stuck over the story
+    const bail = window.setTimeout(() => {
+      if (!root.current || root.current.style.display === 'none') return
+      done.current = true
+      root.current.style.display = 'none'
+      onDone()
+    }, 20000)
+    return () => {
+      cancelAnimationFrame(raf)
+      clearTimeout(bail)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready])
 
