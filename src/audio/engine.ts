@@ -934,8 +934,12 @@ class Engine {
     }
 
     if (kind === 'van-hit') {
+      // the knock-down: one big bass thump (sine dropping 120 → 34 Hz) under a soft rumbling crowd roar that swells in — no noisy rattle
       sub(120, 34, 0.35, 1)
-      burst(900, 0.5, 1.6, 0.9, 'bandpass') // crowd gasp/roar
+      const roar = this.noise('brown')
+      const rf = c.createBiquadFilter(); rf.type = 'bandpass'; rf.frequency.value = 900; rf.Q.value = 0.5
+      const rg = c.createGain(); rg.gain.setValueAtTime(0, t); rg.gain.linearRampToValueAtTime(0.9, t + 0.15); rg.gain.exponentialRampToValueAtTime(0.001, t + 1.6)
+      roar.connect(rf); rf.connect(rg); rg.connect(out); roar.start(t); roar.stop(t + 1.7)
       this.duckUntil = t + 0.5
     } else if (kind === 'ground-hit') {
       sub(95, 38, 0.2, 0.7)
