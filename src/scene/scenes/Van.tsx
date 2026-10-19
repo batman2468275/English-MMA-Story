@@ -1,6 +1,9 @@
-import { useMemo } from 'react'
-import { Vector3 } from 'three'
-import { createFigure, Figure, limitPose, liftAboveFloor, lookAt, resetPose, setHand, solveArm } from '../figure'
+import { useEffect, useMemo, useRef } from 'react'
+import { BackSide, CanvasTexture, SRGBColorSpace, Vector3 } from 'three'
+import { createBursts } from '../bursts'
+import { createCrowd } from '../crowd'
+import { onHit } from '../../core/fx'
+import { createFigure, dress, Figure, limitPose, liftAboveFloor, lookAt, resetPose, setHand, solveArm } from '../figure'
 import { resolveContacts } from '../contact'
 import { glowMaterial, rimMaterial } from '../materials'
 import { Cage } from '../Cage'
@@ -49,6 +52,49 @@ const side = v()
 const tmpA = v()
 const tmpB = v()
 
+const TIER = 0.5
+const burstP = v()
+
+/** the fight mat: a dark canvas with a gold octagon ring, a red centre disc and faint scuffs/noise */
+function arenaTexture() {
+  const c = document.createElement('canvas')
+  c.width = c.height = 512
+  const g = c.getContext('2d')!
+  const grad = g.createRadialGradient(256, 256, 20, 256, 256, 256)
+  grad.addColorStop(0, '#26181c')
+  grad.addColorStop(1, '#101015')
+  g.fillStyle = grad
+  g.fillRect(0, 0, 512, 512)
+  g.strokeStyle = '#c79a35'
+  g.lineWidth = 5
+  g.beginPath()
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + Math.PI / 8
+    const x = 256 + Math.cos(a) * 214
+    const y = 256 + Math.sin(a) * 214
+    if (i) g.lineTo(x, y)
+    else g.moveTo(x, y)
+  }
+  g.closePath()
+  g.stroke()
+  g.fillStyle = 'rgba(179,32,42,0.55)'
+  g.beginPath()
+  g.arc(256, 256, 78, 0, Math.PI * 2)
+  g.fill()
+  g.strokeStyle = 'rgba(199,154,53,0.7)'
+  g.lineWidth = 3
+  g.beginPath()
+  g.arc(256, 256, 78, 0, Math.PI * 2)
+  g.stroke()
+  for (let i = 0; i < 900; i++) {
+    g.fillStyle = `rgba(255,255,255,${Math.random() * 0.045})`
+    g.fillRect(Math.random() * 512, Math.random() * 512, 1 + Math.random() * 2, 1)
+  }
+  const t = new CanvasTexture(c)
+  t.colorSpace = SRGBColorSpace
+  return t
+}
+
 const easeOutQuad = (x: number) => 1 - (1 - x) * (1 - x)
 const easeIn2 = (x: number) => x * x
 
@@ -91,12 +137,43 @@ function strikePath(s: number, out: Vector3, g: Vector3, c0: Vector3, m: Vector3
 }
 
 export function Van() {
-  const van = useMemo(() => createFigure(rimMaterial('#05060a', '#fff1d0', 2.2, 2.1), 1), [])
-  const roy = useMemo(() => createFigure(rimMaterial('#05060a', '#ff4a3a', 2.2, 2.1), 1), [])
+  const van = useMemo(() => {
+    const f = createFigure(rimMaterial('#05060a', '#fff1d0', 2.2, 2.1), 1)
+    dress(f, { gloves: true, mouthguard: true })
+    return f
+  }, [])
+  const roy = useMemo(() => {
+    const f = createFigure(rimMaterial('#05060a', '#ff4a3a', 2.2, 2.1), 1)
+    dress(f, { gloves: true, mouthguard: true })
+    return f
+  }, [])
   const beam = useMemo(() => glowMaterial('#ffffff', 0.5), [])
+  const bursts = useMemo(() => createBursts(store.mobile ? 40 : 90), [])
+  const crowd = useMemo(() => createCrowd({ seed: 11, tier: TIER }), [])
+  const matTex = useMemo(() => arenaTexture(), [])
+  const surge = useRef(0)
+
+  // sweat spray + dust on every strike, and the crowd lurches (same cue names the audio uses; we only listen)
+  useEffect(() => {
+    const off = onHit((name) => {
+      if (name !== 'ground-hit' && name !== 'van-hit') return
+      roy.headC.getWorldPosition(burstP)
+      const big = name === 'van-hit'
+      bursts.spawn(burstP, big ? 26 : 12, { speed: big ? 2.6 : 1.7, size: 0.016, life: 0.8 })
+      burstP.y = 0.03
+      bursts.spawn(burstP, big ? 12 : 6, { speed: 0.9, up: 0.3, size: 0.032, life: 1.1, color: '#c9a45a', gravity: 1.2 })
+      surge.current = Math.min(1, surge.current + (big ? 1 : 0.35))
+    })
+    return () => {
+      off()
+    }
+  }, [bursts, roy])
 
   useSceneFrame(3, (p, dt, state) => {
     const t = state.clock.elapsedTime
+    surge.current *= Math.exp(-dt * 2.2)
+    bursts.update(dt)
+    crowd.update(t, Math.min(1, surge.current + 0.06))
     resetPose(van)
     resetPose(roy)
 
@@ -323,11 +400,29 @@ export function Van() {
 
   return (
     <group>
-      {/* arena floor */}
+      {/* arena floor: a printed mat, then the dark venue floor and the tiered crowd beyond the cage */}
       <mesh rotation={[-Math.PI / 2, 0, Math.PI / 8]}>
         <circleGeometry args={[6, 8]} />
-        <meshStandardMaterial color="#14141a" roughness={0.5} metalness={0.5} />
+        <meshStandardMaterial map={matTex} color="#ffffff" roughness={0.55} metalness={0.35} />
       </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
+        <circleGeometry args={[16, 48]} />
+        <meshStandardMaterial color="#09090d" roughness={0.9} />
+      </mesh>
+      {[1, 2, 3].map((k) => (
+        <group key={k}>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, k * TIER, 0]}>
+            <ringGeometry args={[8.6 + k * 1.35 - 0.68, 16, 48]} />
+            <meshStandardMaterial color="#0d0d12" roughness={0.9} />
+          </mesh>
+          <mesh position={[0, k * TIER - TIER / 2, 0]}>
+            <cylinderGeometry args={[8.6 + k * 1.35 - 0.68, 8.6 + k * 1.35 - 0.68, TIER, 48, 1, true]} />
+            <meshStandardMaterial color="#121218" roughness={0.8} side={BackSide} />
+          </mesh>
+        </group>
+      ))}
+      <primitive object={crowd.group} />
+      <primitive object={bursts.object} />
       <mesh rotation={[-Math.PI / 2, 0, Math.PI / 8]} position={[0, 0.005, 0]}>
         <ringGeometry args={[3.6, 3.7, 8]} />
         <meshBasicMaterial color="#ff4757" toneMapped={false} />

@@ -123,7 +123,11 @@ export function Storm() {
   const cageGlow = useRef(0.05)
 
   const swimMat = useMemo(() => rimMaterial('#15233a', '#d6e6ff', 3.0, 1.5), [])
-  const swimmer = useMemo(() => createFigure(swimMat, 1), [swimMat])
+  const swimmer = useMemo(() => {
+    const s = createFigure(swimMat, 1)
+    s.noShadow = true // he is in water: no floor shadow
+    return s
+  }, [swimMat])
   const objs = useMemo(() => createStormObjects(), [])
   const boltGeoms = useMemo(() => BOLT_POS.map(([x, z], i) => boltGeometry(100 + i, x, z)), [])
   const boltMats = useMemo(

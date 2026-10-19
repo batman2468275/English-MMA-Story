@@ -2,6 +2,7 @@ import { ReactNode, useRef } from 'react'
 import { useFrame, RootState } from '@react-three/fiber'
 import { Group } from 'three'
 import { store } from '../core/store'
+import { updateFigures } from './figure'
 
 /** Runs `fn` every frame, but only while section `index` is the active one. */
 export function useSceneFrame(
@@ -10,7 +11,10 @@ export function useSceneFrame(
 ) {
   useFrame((state, dt) => {
     if (store.active !== index) return
-    fn(store.local[index], Math.min(dt, 0.05), state)
+    const d = Math.min(dt, 0.05)
+    fn(store.local[index], d, state)
+    // life + secondary motion + contact shadows for every visible figure (once per frame, after the scene has posed them)
+    updateFigures(d, state.clock.elapsedTime)
   })
 }
 

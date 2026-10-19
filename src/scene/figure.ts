@@ -1,17 +1,23 @@
 import {
   BoxGeometry,
   BufferGeometry,
+  CanvasTexture,
   CapsuleGeometry,
   CylinderGeometry,
   Group,
   Material,
   Mesh,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
   MathUtils,
   Object3D,
+  PlaneGeometry,
   Quaternion,
   SphereGeometry,
+  TorusGeometry,
   Vector3,
 } from 'three'
+import { store } from '../core/store'
 
 /**
  * A stylised low-poly humanoid. Origin = pelvis. Standing: soles ≈ 0.98 below the origin, head top ≈ 0.95 above
@@ -65,6 +71,39 @@ export interface Figure {
   neck: Object3D // base of the neck (collar line)
   headC: Object3D // centre of the skull
   segments: Segment[]
+  /** life + secondary motion (breathing, sway, blinks, hair / trunks springs, contact shadow) — driven by `updateFigures` */
+  extra: Extra
+  /** set true to skip the contact shadow (swimmers, figures standing in water) */
+  noShadow?: boolean
+}
+
+interface Spring2 {
+  x: number
+  y: number
+  vx: number
+  vy: number
+}
+export interface Extra {
+  chest: Mesh
+  chestTop: Mesh
+  abdomen: Mesh
+  headGeo: Group
+  eyes: Mesh[]
+  hair: Group | null
+  shorts: Group | null
+  phase: number
+  blinkAt: number
+  blinkT: number
+  detail: boolean
+  prevHead: Vector3
+  prevRoot: Vector3
+  velHead: Vector3
+  velRoot: Vector3
+  hairS: Spring2
+  shortS: Spring2
+  seen: boolean
+  shadow: Mesh | null
+  figure: Figure | null
 }
 
 const sph = (r: number, w = 12, h = 8) => new SphereGeometry(r, w, h)
@@ -183,17 +222,59 @@ export function createFigure(mat: Material, scale = 1): Figure {
   const head = new Group()
   head.position.y = 0.64
   spine.add(head)
+  // everything visible on the head lives in `headGeo`, so idle micro-sway can move it without touching the head joint (IK-safe)
+  const headGeo = new Group()
+  head.add(headGeo)
   const skull = new Mesh(sph(0.105, 14, 10), mat)
   skull.position.y = 0.13
   skull.scale.set(0.92, 1.08, 1.02)
-  head.add(skull)
+  headGeo.add(skull)
   const jaw = new Mesh(sph(0.066, 10, 8), mat)
   jaw.position.set(0, 0.07, 0.045)
   jaw.scale.set(0.95, 0.8, 1)
-  head.add(jaw)
+  headGeo.add(jaw)
   const headC = new Object3D()
   headC.position.y = 0.13
   head.add(headC)
+
+  // ghosts (translucent echo copies) and mobile skip the fine detail
+  const ghost = ((mat as unknown as { uniforms?: { uAlpha?: { value: number } } }).uniforms?.uAlpha?.value ?? 1) < 1
+  const detail = !store.mobile && !ghost
+  const eyes: Mesh[] = []
+  let hair: Group | null = null
+  if (detail) {
+    // face: brow ridge, nose, ears, two eye glints (they blink)
+    for (const s of [1, -1]) {
+      const brow = new Mesh(new BoxGeometry(0.052, 0.013, 0.022), mat)
+      brow.position.set(0.04 * s, 0.168, 0.092)
+      brow.rotation.z = -0.18 * s
+      headGeo.add(brow)
+      const ear = new Mesh(sph(0.026, 8, 6), mat)
+      ear.scale.set(0.5, 1, 0.8)
+      ear.position.set(0.096 * s, 0.13, -0.004)
+      headGeo.add(ear)
+      const eye = new Mesh(sph(0.0095, 6, 5), EYE_MAT)
+      eye.position.set(0.038 * s, 0.146, 0.098)
+      headGeo.add(eye)
+      eyes.push(eye)
+    }
+    const nose = new Mesh(new CylinderGeometry(0.004, 0.017, 0.04, 6), mat)
+    nose.rotation.x = Math.PI / 2 - 0.35
+    nose.position.set(0, 0.118, 0.11)
+    headGeo.add(nose)
+    // short cropped hair on its own pivot so it can lag behind head movement
+    hair = new Group()
+    hair.position.set(0, 0.2, -0.015)
+    const cap = new Mesh(sph(0.1, 10, 7), mat)
+    cap.scale.set(0.95, 0.5, 1.04)
+    cap.position.y = -0.015
+    hair.add(cap)
+    const tuft = new Mesh(sph(0.045, 7, 5), mat)
+    tuft.scale.set(1.3, 0.8, 1.2)
+    tuft.position.set(0, 0.012, 0.045)
+    hair.add(tuft)
+    headGeo.add(hair)
+  }
 
   // ---- arms
   const mkArm = (side: 1 | -1) => {
@@ -209,6 +290,12 @@ export function createFigure(mat: Material, scale = 1): Figure {
     sh.add(el)
     const hand = mkHand(mat, side === 1 ? -1 : 1)
     el.add(hand.grp)
+    if (!ghost) {
+      // hand wraps: taped wrist
+      const wrap = new Mesh(new CylinderGeometry(0.044, 0.04, 0.1, 10), WRAP_MAT)
+      wrap.position.y = -0.215
+      el.add(wrap)
+    }
     const tip = new Object3D()
     tip.position.y = -0.38
     el.add(tip)
@@ -246,7 +333,46 @@ export function createFigure(mat: Material, scale = 1): Figure {
   const lL = mkLeg(1)
   const lR = mkLeg(-1)
 
+  // ---- fight shorts (own pivot at the waist so the hem can swing with the motion) + gold waistband
+  let shorts: Group | null = null
+  if (!ghost) {
+    shorts = new Group()
+    shorts.position.set(0, 0.07, 0)
+    const sg = new CylinderGeometry(0.15, 0.225, 0.3, 14, 4, true)
+    const sp = sg.attributes.position
+    for (let i = 0; i < sp.count; i++) {
+      // vertical folds: radial ripple that grows toward the hem
+      const a = Math.atan2(sp.getZ(i), sp.getX(i))
+      const hemK = (0.15 - sp.getY(i)) / 0.3
+      const r = 1 + 0.045 * hemK * Math.sin(a * 7 + hemK * 2)
+      sp.setX(i, sp.getX(i) * r)
+      sp.setZ(i, sp.getZ(i) * r)
+    }
+    sg.computeVertexNormals()
+    const trunks = new Mesh(sg, TRUNK_MAT)
+    trunks.position.y = -0.15
+    trunks.scale.set(1.2, 1, 0.92)
+    shorts.add(trunks)
+    const band = new Mesh(new TorusGeometry(0.152, 0.014, 6, 16), GOLD_MAT)
+    band.rotation.x = Math.PI / 2
+    band.scale.set(1.2, 0.92, 1)
+    shorts.add(band)
+    root.add(shorts)
+  }
+
+  const extra: Extra = {
+    chest, chestTop, abdomen, headGeo, eyes, hair, shorts,
+    phase: Math.random() * 6.28,
+    blinkAt: 1 + Math.random() * 3,
+    blinkT: -9,
+    detail,
+    prevHead: new Vector3(), prevRoot: new Vector3(), velHead: new Vector3(), velRoot: new Vector3(),
+    hairS: { x: 0, y: 0, vx: 0, vy: 0 }, shortS: { x: 0, y: 0, vx: 0, vy: 0 },
+    seen: false, shadow: null, figure: null,
+  }
+
   const fig: Figure = {
+    extra,
     root,
     j: { spine, head, shL: aL.sh, shR: aR.sh, elL: aL.el, elR: aR.el, hpL: lL.hp, hpR: lR.hp, knL: lL.kn, knR: lR.kn },
     ankL: lL.ank,
@@ -272,7 +398,186 @@ export function createFigure(mat: Material, scale = 1): Figure {
     { a: lL.kn, b: lL.ft, r: 0.066, kind: 'shin' },
     { a: lR.kn, b: lR.ft, r: 0.066, kind: 'shin' },
   ]
+  extra.figure = fig
+  all.add(fig)
   return fig
+}
+
+// --------------------------------------------------------------------------
+// Dress-up, life and secondary motion
+// --------------------------------------------------------------------------
+const EYE_MAT = new MeshBasicMaterial({ color: '#fff3dc', toneMapped: false })
+const WRAP_MAT = new MeshStandardMaterial({ color: '#d9cba6', roughness: 0.92 })
+const TRUNK_MAT = new MeshStandardMaterial({ color: '#5a1218', roughness: 0.7, metalness: 0.05, emissive: '#1c0508' })
+const GOLD_MAT = new MeshStandardMaterial({ color: '#c79a35', roughness: 0.4, metalness: 0.7, emissive: '#2a1d05' })
+const GLOVE_MAT = new MeshStandardMaterial({ color: '#b3202a', roughness: 0.45, metalness: 0.1, emissive: '#2a0508' })
+const GUARD_MAT = new MeshStandardMaterial({ color: '#f1f1f1', roughness: 0.3 })
+
+/** Gloves (hands closed inside a padded mitt with a cuff) and a mouthguard for a fighter. */
+export function dress(f: Figure, o: { gloves?: boolean; mouthguard?: boolean } = {}) {
+  if (o.gloves) {
+    for (const side of ['L', 'R'] as const) {
+      const h = f.hands[side]
+      const mitt = new Mesh(sph(1, 10, 8), GLOVE_MAT)
+      mitt.scale.set(0.058, 0.078, 0.066)
+      mitt.position.y = -0.085
+      const cuff = new Mesh(new CylinderGeometry(0.05, 0.05, 0.05, 10), GLOVE_MAT)
+      cuff.position.y = -0.015
+      h.grp.add(mitt, cuff)
+      h.f1.visible = h.f2.visible = h.th.visible = false
+    }
+  }
+  if (o.mouthguard && f.extra.detail) {
+    const g = new Mesh(new CapsuleGeometry(0.008, 0.05, 2, 6), GUARD_MAT)
+    g.rotation.z = Math.PI / 2
+    g.position.set(0, 0.067, 0.097)
+    f.extra.headGeo.add(g)
+  }
+}
+
+const all = new Set<Figure>()
+let shadowTex: CanvasTexture | null = null
+let shadowGeo: PlaneGeometry | null = null
+let shadowMat: MeshBasicMaterial | null = null
+function shadowAssets() {
+  if (!shadowTex) {
+    const c = document.createElement('canvas')
+    c.width = c.height = 64
+    const g = c.getContext('2d')!
+    const grad = g.createRadialGradient(32, 32, 2, 32, 32, 31)
+    grad.addColorStop(0, 'rgba(0,0,0,0.85)')
+    grad.addColorStop(0.55, 'rgba(0,0,0,0.4)')
+    grad.addColorStop(1, 'rgba(0,0,0,0)')
+    g.fillStyle = grad
+    g.fillRect(0, 0, 64, 64)
+    shadowTex = new CanvasTexture(c)
+    shadowGeo = new PlaneGeometry(1, 1)
+    shadowGeo.rotateX(-Math.PI / 2)
+    shadowMat = new MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2 })
+  }
+  return { geo: shadowGeo!, mat: shadowMat! }
+}
+
+const _a = new Vector3()
+const _b = new Vector3()
+const _vq = new Quaternion()
+let lastTick = -1
+
+const visibleDeep = (o: Object3D) => {
+  for (let p: Object3D | null = o; p; p = p.parent) if (!p.visible) return false
+  return true
+}
+
+function springStep(s: Spring2, tx: number, ty: number, dt: number) {
+  const k = 150
+  const d = 11
+  s.vx += (k * (tx - s.x) - d * s.vx) * dt
+  s.vy += (k * (ty - s.y) - d * s.vy) * dt
+  s.x += s.vx * dt
+  s.y += s.vy * dt
+}
+
+/**
+ * Life + secondary motion for every visible figure: breathing, head micro-sway and blinks (all mesh-level, absolute values,
+ * so they never fight the pose / IK), hair and trunks that lag the body's motion on damped springs, and a soft contact shadow
+ * on the floor. Called once per frame by `useSceneFrame` (after the scene has posed its figures). Scaled to zero for
+ * prefers-reduced-motion.
+ */
+export function updateFigures(dt: number, t: number) {
+  if (t === lastTick || dt <= 0) return
+  lastTick = t
+  const amp = store.reduced ? 0 : 1
+  for (const f of all) {
+    const x = f.extra
+    if (!visibleDeep(f.root)) {
+      x.seen = false
+      continue
+    }
+    f.root.updateWorldMatrix(true, true)
+    // ---- velocities (world) of head and pelvis for the spring-driven parts
+    f.headC.getWorldPosition(_a)
+    f.root.getWorldPosition(_b)
+    if (!x.seen || _a.distanceTo(x.prevHead) > 0.8) {
+      x.prevHead.copy(_a)
+      x.prevRoot.copy(_b)
+      x.velHead.set(0, 0, 0)
+      x.velRoot.set(0, 0, 0)
+      x.hairS.x = x.hairS.y = x.hairS.vx = x.hairS.vy = 0
+      x.shortS.x = x.shortS.y = x.shortS.vx = x.shortS.vy = 0
+      x.seen = true
+    }
+    const k = 1 - Math.exp(-14 * dt)
+    x.velHead.lerp(_a.clone().sub(x.prevHead).divideScalar(dt), k)
+    x.velRoot.lerp(_b.clone().sub(x.prevRoot).divideScalar(dt), k)
+    x.prevHead.copy(_a)
+    x.prevRoot.copy(_b)
+
+    if (x.detail) {
+      // ---- breathing + micro-sway + blinks
+      const br = 0.5 + 0.5 * Math.sin(t * 1.7 + x.phase)
+      const e = br * amp
+      x.chest.scale.set(1.16 * (1 + 0.02 * e), 1 + 0.01 * e, 0.74 * (1 + 0.04 * e))
+      x.chestTop.scale.set(1.16 * (1 + 0.02 * e), 0.45, 0.74 * (1 + 0.04 * e))
+      x.abdomen.scale.set(1.08, 1, 0.8 * (1 - 0.012 * e))
+      x.headGeo.rotation.set(
+        0.012 * amp * Math.sin(t * 0.7 + x.phase),
+        0.02 * amp * Math.sin(t * 0.45 + x.phase * 2),
+        0.01 * amp * Math.sin(t * 0.55 + x.phase * 3),
+      )
+      if (t > x.blinkAt && amp > 0) {
+        x.blinkT = t
+        x.blinkAt = t + 2.2 + Math.random() * 3.6
+      }
+      const bl = t - x.blinkT < 0.15 ? Math.sin((Math.PI * (t - x.blinkT)) / 0.15) : 0
+      for (const eye of x.eyes) eye.scale.y = 1 - 0.92 * bl
+
+      // ---- hair lags the head (head velocity in the head's own frame)
+      if (x.hair) {
+        f.j.head.getWorldQuaternion(_vq).invert()
+        _a.copy(x.velHead).applyQuaternion(_vq)
+        springStep(x.hairS, MathUtils.clamp(-_a.z * 0.2 + _a.y * 0.05, -0.5, 0.5), MathUtils.clamp(_a.x * 0.2, -0.5, 0.5), dt)
+        x.hair.rotation.x = x.hairS.x * amp
+        x.hair.rotation.z = x.hairS.y * amp
+      }
+    }
+    // ---- trunks swing with the pelvis
+    if (x.shorts) {
+      f.root.getWorldQuaternion(_vq).invert()
+      _a.copy(x.velRoot).applyQuaternion(_vq)
+      springStep(x.shortS, MathUtils.clamp(-_a.z * 0.1, -0.3, 0.3), MathUtils.clamp(_a.x * 0.1, -0.3, 0.3), dt)
+      x.shorts.rotation.x = x.shortS.x * amp
+      x.shorts.rotation.z = x.shortS.y * amp
+    }
+
+    // ---- contact shadow under the lowest part of the body
+    if (!f.noShadow && !store.lite && f.root.parent) {
+      if (!x.shadow) {
+        const { geo, mat } = shadowAssets()
+        x.shadow = new Mesh(geo, mat)
+        x.shadow.renderOrder = 1
+        x.shadow.frustumCulled = false
+        f.root.parent.add(x.shadow)
+      }
+      let low = Infinity
+      for (const o of [f.ftL, f.ftR, f.j.knL, f.j.knR, f.root]) {
+        o.getWorldPosition(_a)
+        low = Math.min(low, _a.y - (o === f.root ? 0.12 : 0))
+      }
+      const k2 = f.root.getWorldScale(_b).x
+      f.root.getWorldPosition(_b)
+      _a.set(_b.x, low + 0.006, _b.z)
+      f.root.parent.worldToLocal(_a)
+      x.shadow.position.copy(_a)
+      x.shadow.scale.setScalar(1.15 * k2)
+      x.shadow.visible = true
+    } else if (x.shadow) x.shadow.visible = false
+  }
+}
+
+/** Remove a figure's shadow when the figure's scene is torn down (not used by the live scenes, kept for completeness). */
+export function disposeFigure(f: Figure) {
+  all.delete(f)
+  f.extra.shadow?.parent?.remove(f.extra.shadow)
 }
 
 // --------------------------------------------------------------------------

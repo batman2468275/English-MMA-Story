@@ -61,6 +61,14 @@ export function setCam(
   }
 
   cam.position.copy(s.pos)
+  // handheld drift: a few slow, incommensurate sine waves (a real operator's breathing) — position ≈ 1 cm, aim ≈ 0.07°.
+  // Time-based and tiny, so the scroll-scrubbed move itself is unchanged and reversible; off for reduced motion.
+  if (!store.reduced) {
+    const T = performance.now() / 1000
+    const k = store.mobile ? 0.6 : 1
+    cam.position.x += (Math.sin(T * 0.53 + index) + 0.6 * Math.sin(T * 1.17)) * 0.008 * k
+    cam.position.y += (Math.sin(T * 0.41 + 2 * index) + 0.5 * Math.sin(T * 0.97 + 1)) * 0.007 * k
+  }
   const sh = store.fx.shake
   if (sh > 0.001) {
     cam.position.x += (Math.random() - 0.5) * sh
@@ -70,6 +78,11 @@ export function setCam(
   cam.up.set(0, 1, 0)
   cam.lookAt(s.look)
   if (roll) cam.rotateZ(roll)
+  if (!store.reduced) {
+    const T = performance.now() / 1000
+    cam.rotateX(Math.sin(T * 0.62 + index) * 0.0011)
+    cam.rotateY(Math.sin(T * 0.47 + 3 * index) * 0.0011)
+  }
   if (parallax > 0) {
     _right.set(1, 0, 0).applyQuaternion(cam.quaternion)
     cam.position.addScaledVector(_right, store.mouse.x * parallax)

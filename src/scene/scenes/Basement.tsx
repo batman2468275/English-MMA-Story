@@ -3,6 +3,7 @@ import { Color, MeshStandardMaterial, ShaderMaterial, Vector3 } from 'three'
 import { createFigure, Figure, groundFigure, limitPose, lookAt, plantJoint, resetPose, solveArm } from '../figure'
 import { rimMaterial, setRimLight } from '../materials'
 import { Box, Emit, Glow } from '../shapes'
+import { FloorLamp, InstBoxes, InstCylinders, Plant } from '../dressing'
 import { ParticleField } from '../particles'
 import { useSceneFrame, count } from '../hooks'
 import { setCam, keys } from '../camera'
@@ -89,6 +90,97 @@ function BeanBag({ x, z, color }: { x: number; z: number; color: string }) {
       <icosahedronGeometry args={[0.55, 1]} />
       <meshStandardMaterial color={color} roughness={0.95} flatShading />
     </mesh>
+  )
+}
+
+/** Lived-in clutter: shelves of books and trophies, lamps, speakers, a console, cushions, cans, plants, a striped rug. */
+function BasementDressing() {
+  const d = useMemo(() => {
+    const r = mulberry32(77)
+    const palette = ['#5b2a2a', '#2a3b5b', '#3b5b3a', '#6b5a2a', '#4a2a5b', '#2a2a2f', '#7a3b2a', '#c9b48a']
+    const books: { p: [number, number, number]; s: [number, number, number]; c: string }[] = []
+    for (const y of [1.25, 1.85]) {
+      let z = -3.9
+      while (z < 1.1) {
+        const w = 0.04 + r() * 0.05
+        const h = 0.2 + r() * 0.16
+        books.push({ p: [-7.74, y + 0.025 + h / 2, z + w / 2], s: [0.2, h, w], c: palette[Math.floor(r() * palette.length)] })
+        z += w + 0.004 + (r() > 0.93 ? 0.25 : 0) // an occasional gap
+      }
+    }
+    const cans: { p: [number, number, number]; r: number; h: number; c: string }[] = []
+    ;[[-0.3, 0.3, 1.2], [0.6, 0.3, 1.25], [1.0, 0.3, 1.6], [-1.6, 0.04, 2.2], [1.9, 0.04, 0.5], [-3.9, 0.04, -3.9], [2.2, 0.04, -3.0], [-0.1, 0.04, -2.2], [3.9, 0.04, -2.6]].forEach(([x, y, z], i) =>
+      cans.push({ p: [x, y + 0.06, z], r: 0.033, h: 0.12, c: ['#b02a2a', '#2a5ab0', '#d9d9d9', '#2a8a4a'][i % 4] }),
+    )
+    const cushions: { p: [number, number, number]; rot: [number, number, number]; s: [number, number, number]; c: string }[] = [
+      { p: [-3.85, 0.66, -0.12], rot: [0, 0.2, 0.15], s: [0.42, 0.4, 0.14], c: '#6b2a2a' },
+      { p: [-1.5, 0.66, -0.12], rot: [0, -0.15, -0.12], s: [0.4, 0.38, 0.14], c: '#c9b48a' },
+      { p: [1.6, 0.66, -0.12], rot: [0, 0.1, 0.1], s: [0.42, 0.4, 0.14], c: '#2a3b5b' },
+      { p: [3.85, 0.66, -0.12], rot: [0, -0.2, -0.15], s: [0.4, 0.4, 0.14], c: '#6b5a2a' },
+      { p: [-0.7, 0.66, 4.35], rot: [0, 0.1, 0.1], s: [0.38, 0.36, 0.13], c: '#7a3b2a' },
+    ]
+    const stripes = [-2.6, -1.7, -0.8, 0.1, 1.0, 1.9, 2.8].map((x, i) => ({ p: [x, 0.027, 0.9] as [number, number, number], s: [0.18, 0.004, 3.0] as [number, number, number], c: i % 2 ? '#8a5a2a' : '#4a2f5a' }))
+    return { books, cans, cushions, stripes }
+  }, [])
+  return (
+    <group>
+      {/* shelves with books + a few trophies (left wall) */}
+      {[1.25, 1.85].map((y) => <Box key={y} position={[-7.78, y, -1.4]} size={[0.4, 0.05, 5.2]} color="#2a1f18" />)}
+      <InstBoxes items={d.books} rough={0.9} />
+      {[-3.6, -2.4, -0.8, 0.5].map((z, i) => (
+        <Box key={i} position={[-7.72, 1.96 + 0.1, z]} size={[0.1, 0.2 + (i % 2) * 0.08, 0.1]} color="#c8a85c" metal={0.8} rough={0.3} />
+      ))}
+      {/* framed photos (right wall) */}
+      {[-3.4, -1.4, 0.8, 2.6].map((z, i) => (
+        <group key={z} position={[7.93, 2.2 + (i % 2) * 0.25, z]}>
+          <Box size={[0.05, 0.78, 0.58]} color="#17120e" rough={0.6} />
+          <Emit position={[-0.03, 0, 0]} size={[0.02, 0.66, 0.46]} color={['#3a4a6b', '#6b3a3a', '#4a6b4a', '#6b5a3a'][i]} boost={0.35} />
+        </group>
+      ))}
+      {/* warm floor lamps break up the blue screen light; side tables with little lamps */}
+      <FloorLamp position={[-6.3, 0, -2.4]} h={1.75} />
+      <FloorLamp position={[6.3, 0, -2.4]} h={1.75} />
+      <FloorLamp position={[-6.4, 0, 5.0]} h={1.5} color="#ffa86b" glow={0.8} />
+      <FloorLamp position={[6.4, 0, 5.2]} h={1.5} color="#ffa86b" glow={0.8} />
+      {[-4.55, 4.55].map((x) => (
+        <group key={x}>
+          <Box position={[x, 0.27, -0.45]} size={[0.5, 0.54, 0.5]} color="#241a14" rough={0.7} />
+          <FloorLamp position={[x, 0.54, -0.45]} h={0.34} glow={0.45} />
+        </group>
+      ))}
+      {/* speakers either side of the screen, a console + controller on the cabinet */}
+      {[-5.4, 5.4].map((x) => (
+        <group key={x} position={[x, 0, -5.95]}>
+          <Box position={[0, 0.95, 0]} size={[0.5, 1.9, 0.45]} color="#0b0c11" rough={0.5} metal={0.3} />
+          {[0.62, 1.3].map((y, i) => (
+            <mesh key={y} position={[0, y, 0.23]} rotation={[Math.PI / 2, 0, 0]}>
+              <cylinderGeometry args={[i ? 0.09 : 0.15, i ? 0.09 : 0.15, 0.03, 16]} />
+              <meshStandardMaterial color="#1b1d24" roughness={0.4} metalness={0.6} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+      <Box position={[-1.4, 0.76, -5.9]} size={[0.44, 0.06, 0.3]} color="#12131a" rough={0.4} metal={0.4} />
+      <Emit position={[-1.28, 0.8, -5.74]} size={[0.04, 0.015, 0.01]} color="#ff3a3a" boost={2} />
+      <Box position={[-0.6, 0.745, -5.85]} size={[0.14, 0.03, 0.09]} color="#1b1c24" />
+      {/* cushions, blanket, cans, rug stripes */}
+      <InstBoxes items={d.cushions} rough={0.95} />
+      <Box position={[3.9, 0.82, 0.32]} size={[0.8, 0.05, 0.5]} rotation={[0.15, 0, 0.25]} color="#6b2a2a" rough={1} />
+      <InstCylinders items={d.cans} rough={0.4} metal={0.7} seg={8} />
+      <InstBoxes items={d.stripes} rough={1} />
+      <Plant position={[-7.2, 0, 5.9]} scale={1.3} />
+      <Plant position={[7.1, 0, 5.7]} scale={1.1} color="#2a5a30" />
+      {/* recessed ceiling lights + wall sconces */}
+      {[[-4, -3], [4, -3], [-4, 2.5], [4, 2.5], [0, 5.5]].map(([x, z], i) => (
+        <Emit key={i} position={[x, 3.98, z]} size={[0.32, 0.02, 0.32]} color="#ffd9a0" boost={0.7} />
+      ))}
+      {[-3.5, 3.5].map((x) => (
+        <group key={x} position={[x, 2.2, 6.93]}>
+          <Box size={[0.3, 0.1, 0.1]} color="#1a1410" />
+          <Glow position={[0, 0, -0.3]} size={2.2} color="#ffb36b" opacity={0.28} />
+        </group>
+      ))}
+    </group>
   )
 }
 
@@ -320,6 +412,8 @@ export function Basement() {
         <Box key={i} position={[6.9, 1.28, z]} size={[0.22, 0.28 + (i % 2) * 0.1, 0.18]} color="#c8a85c" metal={0.8} rough={0.3} />
       ))}
       <Box position={[6.6, 0.45, 2.4]} size={[0.8, 0.9, 0.7]} color="#d0d3da" rough={0.35} metal={0.6} />
+
+      <BasementDressing />
 
       {figs.map((f, i) => (
         <primitive key={i} object={f.root} />

@@ -15,7 +15,7 @@ import {
   SRGBColorSpace,
   Vector3,
 } from 'three'
-import { createFigure, Figure, groundFigure, limitPose, lookAt, resetPose, solveArm, solveLeg, plantJoint, palmFacing, setHand } from '../figure'
+import { createFigure, dress, Figure, groundFigure, limitPose, lookAt, resetPose, solveArm, solveLeg, plantJoint, palmFacing, setHand } from '../figure'
 import { resolveContacts } from '../contact'
 import { rimMaterial, setRimLight } from '../materials'
 import { Emit, Glow, Box } from '../shapes'
@@ -25,6 +25,7 @@ import { setCam, keys } from '../camera'
 import { easeInOut, lerp, smooth } from '../../core/math'
 import { store } from '../../core/store'
 import { metalTexture, woodTexture } from '../procTextures'
+import { InstCylinders, InstSpheres } from '../dressing'
 
 /**
  * 09 — WALKING INTO THE GYM. The camera steps through a door into a tight, slightly claustrophobic room (low ceiling, close walls,
@@ -147,13 +148,26 @@ export function Gym() {
     }),
     [],
   )
+  const gymDress = useMemo(() => {
+    const cols = ['#b3202a', '#1a1a1f', '#3a3d46', '#c79a35']
+    const balls: { p: [number, number, number]; r: number; c: string }[] = []
+    for (const y of [0.62, 1.12]) for (let i = 0; i < 6; i++) balls.push({ p: [0.2, y + 0.025 + 0.12, -10.9 + i * 0.42], r: 0.12, c: cols[(i + (y > 1 ? 1 : 0)) % cols.length] })
+    const plates: { p: [number, number, number]; rot: [number, number, number]; r: number; h: number; c: string }[] = []
+    for (const z of [-13.4, -15.0]) for (const y of [0.7, 1.3, 1.9]) for (let i = 0; i < 3; i++) plates.push({ p: [0.2 + i * 0.07, y, z], rot: [0, 0, Math.PI / 2], r: 0.24 - i * 0.02, h: 0.05, c: cols[(i + (y > 1 ? 1 : 0)) % cols.length] })
+    return { balls, plates }
+  }, [])
   const rim = useMemo(() => rimMaterial('#0a0b10', '#d6e0ff', 2.6, 1.8), [])
   const mobile = store.mobile
 
   const F = useMemo(() => {
     const mk = () => createFigure(rim)
+    const gl = () => {
+      const f = mk()
+      dress(f, { gloves: true, mouthguard: true })
+      return f
+    }
     return {
-      padK: mk(), padH: mk(), spA: mk(), spB: mk(), grA: mk(), grB: mk(), bagMan: mk(), shadow: mk(), rope: mk(), lifter: mk(), stretch: mk(), watcher: mk(),
+      padK: gl(), padH: mk(), spA: gl(), spB: gl(), grA: mk(), grB: mk(), bagMan: gl(), shadow: gl(), rope: mk(), lifter: mk(), stretch: mk(), watcher: mk(),
     }
   }, [rim])
   const ropeGeom = useMemo(() => {
@@ -549,6 +563,18 @@ export function Gym() {
             <Emit position={[0, 0, 0]} size={[1.5, 0.7, 0.03]} color={i ? '#1f3a6b' : '#6b1f26'} boost={0.55} />
           </group>
         ))}
+        {/* medicine-ball shelf, plate rack and a wall clock (instanced) */}
+        <Box position={[0.2, 0.62, -9.8]} size={[0.34, 0.05, 2.6]} color="#2a2d36" rough={0.5} metal={0.6} />
+        <Box position={[0.2, 1.12, -9.8]} size={[0.34, 0.05, 2.6]} color="#2a2d36" rough={0.5} metal={0.6} />
+        <InstSpheres items={gymDress.balls} rough={0.55} />
+        <Box position={[0.12, 1.0, -13.4]} size={[0.06, 2.0, 0.06]} color="#6b7280" rough={0.4} metal={0.8} />
+        <Box position={[0.12, 1.0, -15.0]} size={[0.06, 2.0, 0.06]} color="#6b7280" rough={0.4} metal={0.8} />
+        <InstCylinders items={gymDress.plates} rough={0.5} metal={0.5} seg={16} />
+        <group position={[0.05, 3.3, -6.3]} rotation={[0, Math.PI / 2, 0]}>
+          <Emit size={[0.5, 0.5, 0.03]} color="#f3efe4" boost={0.9} />
+          <Box position={[0, 0.07, 0.03]} size={[0.02, 0.16, 0.01]} color="#111" />
+          <Box position={[0.05, 0, 0.03]} size={[0.12, 0.02, 0.01]} color="#111" />
+        </group>
       </group>
       <group ref={rightDecor}>
         {Array.from({ length: 6 }).map((_, i) => (
@@ -567,9 +593,30 @@ export function Gym() {
             <Emit position={[0, 0, 0]} size={[2.4, 1.2, 0.03]} color="#9ab8e8" boost={0.9} />
           </group>
         ))}
+        {/* plyo boxes, a tractor tire and a wall-mounted battle-rope anchor */}
+        <Box position={[-0.4, 0.3, -9]} size={[0.7, 0.6, 0.8]} color="#2a2d36" rough={0.6} metal={0.3} />
+        <Box position={[-0.4, 0.85, -9]} size={[0.6, 0.5, 0.7]} color="#3a2a2a" rough={0.6} metal={0.3} />
+        <Box position={[-0.4, 0.2, -10.2]} size={[0.6, 0.4, 0.7]} color="#2a3a2a" rough={0.6} metal={0.3} />
+        <mesh position={[-0.55, 0.22, -11.8]} rotation={[Math.PI / 2 - 0.35, 0, 0]}>
+          <torusGeometry args={[0.46, 0.2, 10, 20]} />
+          <meshStandardMaterial color="#121214" roughness={0.95} />
+        </mesh>
+        <Box position={[-0.06, 1.1, -12.9]} size={[0.1, 0.1, 0.5]} color="#6b7280" rough={0.4} metal={0.8} />
+        {[0, 1].map((k) => (
+          <mesh key={k} position={[-0.9, 0.05, -12.9 + (k ? 0.14 : -0.14) - 0.0]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[0.025, 0.025, 1.7, 8]} />
+            <meshStandardMaterial color="#c9b48a" roughness={0.9} />
+          </mesh>
+        ))}
       </group>
 
       <group ref={strips}>
+        {/* overhead ductwork + conduit so the ceiling is not a flat slab */}
+        <Box position={[0.6, -0.42, -4]} size={[0.7, 0.36, 42]} color="#2a2d33" rough={0.5} metal={0.6} />
+        <mesh position={[-1.1, -0.22, -4]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.07, 0.07, 42, 8]} />
+          <meshStandardMaterial color="#6b7280" roughness={0.4} metalness={0.8} />
+        </mesh>
         {[-2, -6.5, -11, -15.5, -20, 2.5, 7].map((z, i) => (
           <group key={i} position={[0, 0, z]}>
             <Emit position={[0, 0, 0]} size={[0.3, 0.05, 3.2]} color="#eef3ff" boost={2.2} />

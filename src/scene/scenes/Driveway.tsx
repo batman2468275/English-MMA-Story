@@ -14,6 +14,7 @@ import {
   Texture,
 } from 'three'
 import { Box, Emit, Glow } from '../shapes'
+import { Plant } from '../dressing'
 import { ParticleField } from '../particles'
 import { useSceneFrame, count } from '../hooks'
 import { setCam, keys } from '../camera'
@@ -460,6 +461,35 @@ export function Driveway() {
         <Box position={[0, 0.55, 0]} size={[0.1, 1.1, 0.1]} color="#3a3c44" />
         <Box position={[0, 1.15, 0]} size={[0.28, 0.24, 0.5]} color="#2a3550" rough={0.5} metal={0.5} />
       </group>
+
+      {/* lived-in details: wheelie bins by the garage, a kid's hoop over the garage door, a bike left on the lawn, porch plants */}
+      {[0, 1].map((i) => (
+        <group key={i} position={[-(BLOCK_W / 2 + 4.9) + i * 0.85, 0, FRONT_Z + 1.5]} rotation={[0, 0.12 * (i ? -1 : 1), 0]}>
+          <Box position={[0, 0.48, 0]} size={[0.56, 0.96, 0.62]} color={i ? '#1f3b2a' : '#1d2a44'} rough={0.6} />
+          <Box position={[0, 0.99, -0.02]} size={[0.62, 0.07, 0.68]} color={i ? '#183021' : '#16213a'} rough={0.6} />
+          <Box position={[0, 0.55, 0.32]} size={[0.3, 0.05, 0.02]} color="#0b0b0e" />
+        </group>
+      ))}
+      <group position={[-(BLOCK_W / 2 + 2.75), 3.05, FRONT_Z + 0.08]}>
+        <Box size={[1.05, 0.7, 0.05]} color="#e8e4da" rough={0.5} />
+        <Box position={[0, -0.12, 0.03]} size={[0.4, 0.3, 0.01]} color="#b3202a" />
+        <mesh position={[0, -0.25, 0.28]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.2, 0.014, 6, 18]} />
+          <meshStandardMaterial color="#e0702a" roughness={0.4} metalness={0.4} />
+        </mesh>
+      </group>
+      <group position={[4.8, 0.05, FRONT_Z + 3.4]} rotation={[0, 0.7, 0]}>
+        {[-0.36, 0.36].map((x) => (
+          <mesh key={x} position={[x, 0.03, 0]} rotation={[Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[0.24, 0.025, 6, 16]} />
+            <meshStandardMaterial color="#111" roughness={0.8} />
+          </mesh>
+        ))}
+        <Box position={[0, 0.1, 0]} size={[0.78, 0.03, 0.04]} color="#b3202a" rough={0.5} metal={0.5} />
+        <Box position={[0.25, 0.14, 0]} size={[0.04, 0.04, 0.3]} color="#222" />
+      </group>
+      <Plant position={[-1.6, 0.2, FRONT_Z + 1.7]} scale={0.8} color="#2a5a30" />
+      <Plant position={[1.6, 0.2, FRONT_Z + 1.7]} scale={0.7} />
 
       {/* picket fence */}
       {!store.mobile && (

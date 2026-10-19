@@ -27,6 +27,8 @@ const dummy = new Object3D()
 const V = () => new Vector3()
 const startL = V(), faceL = V(), faceP = V(), handT = V(), poleL = V(), faceDir = V(), tmpB = V(), tmpC = V()
 const startR = V(), shoulderP = V(), handR = V(), poleR = V(), wristP = V(), startB = V(), handB = V(), poleB = V()
+const lagP = V(), lagV = V()
+let lagInit = false
 const easeIn = (x: number) => x * x
 const easeOut = (x: number) => 1 - (1 - x) * (1 - x)
 /** reach with anticipation: a small pull back, then an ease-out to the target (x: 0..1 → -0.05..1) */
@@ -200,7 +202,17 @@ export function Quiet() {
     const press = 0.012 * cover * (1 - 0.6 * flinch) // palm presses a touch as it settles
     handT.z -= press
     poleL.set(0.5, 0.35, 1) // elbow out toward the camera and up
-    solveArm(dad, 'L', handT, 1, poleL)
+    // secondary motion: the hand trails its target on a damped spring, so it arrives, overshoots a hair and settles
+    // (the fast, stiff spring keeps it glued to the face; scrubbing back and forth just re-settles it)
+    if (!lagInit || handT.distanceTo(lagP) > 0.6) {
+      lagP.copy(handT)
+      lagV.set(0, 0, 0)
+      lagInit = true
+    }
+    const sd = Math.min(dt, 0.033)
+    lagV.addScaledVector(tmpV.copy(handT).sub(lagP), 260 * sd).multiplyScalar(Math.exp(-17 * sd))
+    lagP.addScaledVector(lagV, sd)
+    solveArm(dad, 'L', lagP, 1, poleL)
     palmFacing(dad, 'L', faceDir.set(0, 0, -1), smooth(0.0, 0.05, p)) // palm flat onto the face
     setHand(dad, 'L', 0.03) // open, fingers extended across the brow
 
