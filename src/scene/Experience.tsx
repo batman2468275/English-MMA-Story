@@ -53,7 +53,7 @@ function DebugBadge() {
     const gpu = ext ? String(ctx.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : 'unknown'
     const el = document.createElement('div')
     el.style.cssText = 'position:fixed;left:8px;top:8px;z-index:9999;max-width:90vw;padding:6px 9px;background:rgba(0,0,0,.8);color:#9f9;font:11px/1.4 monospace;border-radius:6px;pointer-events:none'
-    el.textContent = `build ${__BUILD__} | ${store.mobile ? 'touch pipeline (direct)' : 'desktop pipeline (post)'} | dpr ${gl.getPixelRatio().toFixed(2)} | ${gpu}`
+    el.textContent = `build ${__BUILD__} | ${store.mobile ? 'touch pipeline (direct)' : 'desktop pipeline (post)'} | dpr ${gl.getPixelRatio().toFixed(2)} | ${store.detect} | ${gpu}`
     document.body.appendChild(el)
     return () => el.remove()
   }, [gl])

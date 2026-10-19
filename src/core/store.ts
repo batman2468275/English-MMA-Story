@@ -9,6 +9,8 @@ export const store = {
   // ---- environment flags
   reduced: false,
   mobile: false,
+  /** device-detection readout shown by ?debug */
+  detect: '',
   /** dev/testing shortcut (?lite): no bloom/MSAA, low resolution — for slow software renderers */
   lite: false,
   ready: false,

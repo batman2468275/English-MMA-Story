@@ -24,11 +24,14 @@ const hasWebGL = (() => {
 
 store.reduced = prefersReduced || forceReduced || !hasWebGL
 const q = new URLSearchParams(location.search)
-store.mobile = q.has('mobile')
-  ? true
-  : q.has('desktop')
-    ? false
-    : window.innerWidth <= 820 || (window.matchMedia('(pointer: coarse)').matches && window.matchMedia('(hover: none)').matches)
+// Touch devices must take the direct-render pipeline: their GPUs mis-render the half-float bloom / post-processing chain
+// (a lattice of coloured blobs over bright areas). iPadOS Safari identifies itself as a Mac and often reports
+// (hover: hover), so the old "coarse pointer AND no hover" test let iPads through to the desktop pipeline.
+const ua = navigator.userAgent
+const touchOS = /iPhone|iPad|iPod|Android/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)
+const coarse = window.matchMedia('(pointer: coarse)').matches
+store.mobile = q.has('mobile') ? true : q.has('desktop') ? false : window.innerWidth <= 820 || touchOS || coarse
+store.detect = `touchOS ${touchOS ? 1 : 0} | coarse ${coarse ? 1 : 0} | hover ${window.matchMedia('(hover: hover)').matches ? 1 : 0} | tp ${navigator.maxTouchPoints}`
 store.lite = q.has('lite')
 document.documentElement.classList.toggle('reduced', store.reduced)
 document.documentElement.classList.toggle('mobile', store.mobile)
