@@ -142,6 +142,22 @@ export default function Experience({ onReady }: { onReady: () => void }) {
   const mobile = store.mobile
   // adaptive resolution: if the frame rate drops, render at a lower pixel ratio; recover when it's healthy again
   const [dpr, setDpr] = useState<number>(mobile ? Math.min(Math.max(window.devicePixelRatio, 1), 1.75) : 1.6)
+  // The monitor only arms a few seconds AFTER the loader (shader compile makes the first frames slow), only ever steps DOWN
+  // (every change reallocates the frame buffer = a visible hitch + resolution pop, so bouncing up and down was itself choppy),
+  // and never goes below 1.0 (anything lower is visibly fuzzy).
+  const [armed, setArmed] = useState(false)
+  useEffect(() => {
+    let to = 0
+    const id = window.setInterval(() => {
+      if (!store.ready) return
+      window.clearInterval(id)
+      to = window.setTimeout(() => setArmed(true), 3000)
+    }, 300)
+    return () => {
+      window.clearInterval(id)
+      window.clearTimeout(to)
+    }
+  }, [])
   return (
     <div className="stage" aria-hidden="true">
       <Canvas
@@ -151,10 +167,7 @@ export default function Experience({ onReady }: { onReady: () => void }) {
         flat={mobile}
         gl={{ antialias: mobile && !store.lite, powerPreference: 'high-performance', alpha: false, stencil: false }}
       >
-        <PerformanceMonitor
-          onDecline={() => setDpr((d) => Math.max(0.85, d - 0.25))}
-          onIncline={() => setDpr((d) => Math.min(mobile ? 1.75 : 2, d + 0.15))}
-        />
+        {armed && <PerformanceMonitor flipflops={3} onDecline={() => setDpr((d) => Math.max(1, d - 0.25))} />}
         <FrameClock />
         <DebugPanel />
         <Suspense fallback={null}>

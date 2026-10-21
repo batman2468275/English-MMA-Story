@@ -16,6 +16,8 @@ export function FxOverlay() {
   const crack = useRef<SVGSVGElement>(null)
   const crackMain = useRef<SVGGElement>(null)
   const crackGlow = useRef<SVGGElement>(null)
+  const crackPaths = useRef<{ main: SVGPathElement[]; glow: SVGPathElement[] } | null>(null)
+  const last = useRef({ c: -1, h: -1, vis: false })
 
   useTicker(() => {
     const f = store.fx
@@ -34,18 +36,31 @@ export function FxOverlay() {
     }
     if (crack.current) {
       const visible = f.crack > 0.002 && store.active === 10
-      crack.current.style.opacity = visible ? '1' : '0'
-      if (crackMain.current) {
-        crackMain.current.querySelectorAll('path').forEach((p) => {
-          ;(p as SVGPathElement).style.strokeDashoffset = String(1 - f.crack)
-        })
-        crackMain.current.style.opacity = String(1 - f.heal * 0.35)
+      // the crack is a full-screen SVG: only touch it when something visibly changed (a repaint of it costs a whole frame on a tablet)
+      const c = Math.round(f.crack * 200) / 200
+      const h = Math.round(f.heal * 200) / 200
+      const L = last.current
+      if (visible !== L.vis) {
+        crack.current.style.opacity = visible ? '1' : '0'
+        L.vis = visible
       }
-      if (crackGlow.current) {
-        crackGlow.current.style.opacity = String(f.heal)
-        crackGlow.current.querySelectorAll('path').forEach((p) => {
-          ;(p as SVGPathElement).style.strokeDashoffset = String(1 - Math.min(1, f.heal * 1.15))
-        })
+      if (visible && (c !== L.c || h !== L.h)) {
+        if (!crackPaths.current && crackMain.current && crackGlow.current) {
+          crackPaths.current = {
+            main: Array.from(crackMain.current.querySelectorAll('path')),
+            glow: Array.from(crackGlow.current.querySelectorAll('path')),
+          }
+        }
+        const P = crackPaths.current
+        if (P && crackMain.current && crackGlow.current) {
+          for (const p of P.main) p.style.strokeDashoffset = String(1 - c)
+          crackMain.current.style.opacity = String(1 - h * 0.35)
+          crackGlow.current.style.opacity = String(h)
+          const g = String(1 - Math.min(1, h * 1.15))
+          for (const p of P.glow) p.style.strokeDashoffset = g
+        }
+        L.c = c
+        L.h = h
       }
     }
   })
@@ -54,12 +69,6 @@ export function FxOverlay() {
     <div className="fx" aria-hidden="true">
       <div ref={flare} className="fx-flare" />
       <svg ref={crack} className="fx-crack" viewBox="0 0 1000 600" preserveAspectRatio="none">
-        <defs>
-          <filter id="glowf" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="6" result="b" />
-            <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
-          </filter>
-        </defs>
         <g ref={crackMain} fill="none" stroke="#f4f1ea" strokeWidth="2.2" strokeLinejoin="miter">
           <path pathLength="1" strokeDasharray="1" d="M-10 90 L120 130 L170 105 L290 200 L330 180 L450 300 L520 285 L610 380 L690 360 L790 470 L850 455 L1010 590" />
           <path pathLength="1" strokeDasharray="1" strokeWidth="1.3" d="M290 200 L270 290 L310 330" />
@@ -67,7 +76,7 @@ export function FxOverlay() {
           <path pathLength="1" strokeDasharray="1" strokeWidth="1.3" d="M610 380 L650 270 L720 240" />
           <path pathLength="1" strokeDasharray="1" strokeWidth="1.1" d="M790 470 L760 540" />
         </g>
-        <g ref={crackGlow} fill="none" stroke="var(--accent-2)" strokeWidth="4" filter="url(#glowf)" style={{ opacity: 0 }}>
+        <g ref={crackGlow} fill="none" stroke="var(--accent-2)" strokeWidth="4" strokeLinecap="round" style={{ opacity: 0 }}>
           <path pathLength="1" strokeDasharray="1" d="M-10 90 L120 130 L170 105 L290 200 L330 180 L450 300 L520 285 L610 380 L690 360 L790 470 L850 455 L1010 590" />
           <path pathLength="1" strokeDasharray="1" strokeWidth="2.5" d="M290 200 L270 290 L310 330" />
           <path pathLength="1" strokeDasharray="1" strokeWidth="2.5" d="M450 300 L420 400 L470 450" />
@@ -83,9 +92,8 @@ export function FxOverlay() {
               <stop offset="0" stopColor="#06070c" />
               <stop offset="1" stopColor="#000" />
             </linearGradient>
-            <filter id="handsoft"><feGaussianBlur stdDeviation="2.5" /></filter>
           </defs>
-          <g fill="url(#handg)" stroke="rgba(120,150,255,.55)" strokeWidth="5" filter="url(#handsoft)">
+          <g fill="url(#handg)" stroke="rgba(120,150,255,.55)" strokeWidth="5">
             <rect x="300" y="430" width="420" height="640" rx="170" />
             <rect x="305" y="130" width="86" height="400" rx="43" />
             <rect x="405" y="60" width="90" height="470" rx="45" />

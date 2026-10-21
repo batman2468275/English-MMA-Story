@@ -38,7 +38,8 @@ export function StormSection() {
       const mid = (p - (f.p0 + f.p1) / 2) / span
       el.style.opacity = String(o)
       el.style.transform = `translate3d(${f.drift * mid * 220}px, ${-mid * 60}px, 0)`
-      el.style.filter = o < 0.98 ? `blur(${(1 - o) * 9}px)` : 'none'
+      // a blur filter re-rasterises the text every frame: desktop only, and in whole-pixel steps; touch screens just fade
+      el.style.filter = !store.mobile && o < 0.98 ? `blur(${Math.round((1 - o) * 9)}px)` : 'none'
     })
     // key line
     const { p0, p1 } = stormKeyLine

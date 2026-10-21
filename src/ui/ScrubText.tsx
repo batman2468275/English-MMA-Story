@@ -103,7 +103,7 @@ export function ScrubText({
         }
         case 'blur': {
           const t = targets('.w')
-          tl.fromTo(t, { opacity: 0, filter: 'blur(14px)', y: 14 }, { opacity: 1, filter: 'blur(0px)', y: 0, duration: a * 0.22, stagger: { amount: a * 0.78 } }, 0)
+          tl.fromTo(t, store.mobile ? { opacity: 0, y: 14 } : { opacity: 0, filter: 'blur(14px)', y: 14 }, store.mobile ? { opacity: 1, y: 0, duration: a * 0.22, stagger: { amount: a * 0.78 } } : { opacity: 1, filter: 'blur(0px)', y: 0, duration: a * 0.22, stagger: { amount: a * 0.78 } }, 0)
           break
         }
         case 'chars': {
@@ -123,7 +123,7 @@ export function ScrubText({
         }
         case 'scale': {
           const t = targets('.sent')
-          tl.fromTo(t, { scale: 1.5, opacity: 0, filter: 'blur(8px)', transformOrigin: '0% 50%' }, { scale: 1, opacity: 1, filter: 'blur(0px)', duration: a * 0.3, stagger: { amount: a * 0.7 } }, 0)
+          tl.fromTo(t, store.mobile ? { scale: 1.5, opacity: 0, transformOrigin: '0% 50%' } : { scale: 1.5, opacity: 0, filter: 'blur(8px)', transformOrigin: '0% 50%' }, store.mobile ? { scale: 1, opacity: 1, duration: a * 0.3, stagger: { amount: a * 0.7 } } : { scale: 1, opacity: 1, filter: 'blur(0px)', duration: a * 0.3, stagger: { amount: a * 0.7 } }, 0)
           break
         }
         case 'rotate': {
@@ -138,7 +138,7 @@ export function ScrubText({
         }
       }
       // exit
-      if (!noExit) tl.to(host, { opacity: 0, y: -50, filter: 'blur(6px)', duration: 1 - b }, b)
+      if (!noExit) tl.to(host, store.mobile ? { opacity: 0, y: -50, duration: 1 - b } : { opacity: 0, y: -50, filter: 'blur(6px)', duration: 1 - b }, b)
     }, host)
     return () => ctx.revert()
   }, [variant, index, el, text, noExit])
